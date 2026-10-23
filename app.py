@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Aura Health - телемедицинская платформа (один файл, Python 3.9+).
-Запуск: python aura_health.py  (или вставить в ячейку Jupyter).
+M.A.R.S. - Mobility & Asymmetry Reporting Sessions: связь в локальной сети, оценка подвижности и асимметрии лица, отчёты по сеансу (один файл, Python 3.9+).
+Запуск: python mars.py  (или вставить в ячейку Jupyter).
 Сервер: только стандартная библиотека. Клиент: без CDN, MediaPipe отдаётся локально с /vendor.
 """
 import base64
@@ -31,13 +31,13 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 # Повторный запуск ячейки Jupyter: сначала останавливаем предыдущий экземпляр
-_prev = globals().get("_AURA_RUNNING")
+_prev = globals().get("_MARS_RUNNING")
 if _prev is not None:
     try:
         _prev.stop()
     except Exception:
         pass
-_AURA_RUNNING = None
+_MARS_RUNNING = None
 
 
 # ----------------------------------------------------------------------------
@@ -51,7 +51,7 @@ def _env_bool(name, default):
 
 
 PORT = int(os.environ.get("PORT", "8000"))
-DATA_DIR = Path(os.environ.get("DATA_DIR", "aura_data")).resolve()
+DATA_DIR = Path(os.environ.get("DATA_DIR", "mars_data")).resolve()
 AUTH_REQUIRED = _env_bool("AUTH_REQUIRED", True)
 CERT_FILE = os.environ.get("CERT_FILE", "")
 KEY_FILE = os.environ.get("KEY_FILE", "")
@@ -97,7 +97,7 @@ VENDOR_FILES = [
     ("face_landmarker.task", "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task"),
 ]
 
-log = logging.getLogger("aura")
+log = logging.getLogger("mars")
 DB = None
 COND = threading.Condition()
 ROOMS = {}
@@ -466,7 +466,7 @@ def ensure_vendor():
         target.parent.mkdir(parents=True, exist_ok=True)
         try:
             print("Скачиваю %s ..." % rel)
-            req = urllib.request.Request(url, headers={"User-Agent": "AuraHealth/1.0"})
+            req = urllib.request.Request(url, headers={"User-Agent": "MARS/1.0"})
             with urllib.request.urlopen(req, timeout=120) as resp:
                 data = resp.read()
             if not data:
@@ -535,7 +535,7 @@ VENDOR_MIME = {".mjs": "text/javascript", ".js": "text/javascript", ".wasm": "ap
 
 class Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
-    server_version = "AuraHealth"
+    server_version = "MARS"
     sys_version = ""
     timeout = 90
 
@@ -619,7 +619,7 @@ class Handler(BaseHTTPRequestHandler):
             return None
 
     def doctor(self, required=True):
-        sid = self.cookie("aura_sid")
+        sid = self.cookie("mars_sid")
         if sid:
             row = DB.one("SELECT d.* FROM sessions s JOIN doctors d ON d.id=s.doctor_id "
                          "WHERE s.sid=? AND s.expires>?", (sid_hash(sid), now()))
@@ -755,7 +755,7 @@ class Handler(BaseHTTPRequestHandler):
         sid = secrets.token_urlsafe(32)
         DB.run("INSERT INTO sessions(sid,doctor_id,expires) VALUES(?,?,?)", (sid_hash(sid), row["id"], now() + SESSION_TTL))
         audit("doctor:%s" % row["login"], "login")
-        cookie = "aura_sid=%s; Path=/; HttpOnly; SameSite=Strict; Max-Age=%d" % (sid, SESSION_TTL)
+        cookie = "mars_sid=%s; Path=/; HttpOnly; SameSite=Strict; Max-Age=%d" % (sid, SESSION_TTL)
         if SECURE:
             cookie += "; Secure"
         self.send_json(200, {"doctor": {"id": row["id"], "name": row["name"], "login": row["login"],
@@ -763,13 +763,13 @@ class Handler(BaseHTTPRequestHandler):
 
     def h_logout(self):
         self.read_raw(65536)
-        sid = self.cookie("aura_sid")
+        sid = self.cookie("mars_sid")
         doc = self.doctor(required=False)
         if sid:
             DB.run("DELETE FROM sessions WHERE sid=?", (sid_hash(sid),))
         if doc:
             audit(self.actor(doc), "logout")
-        cookie = "aura_sid=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0" + ("; Secure" if SECURE else "")
+        cookie = "mars_sid=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0" + ("; Secure" if SECURE else "")
         self.send_json(200, {"status": "ok"}, {"Set-Cookie": cookie})
 
     def h_me(self):
@@ -1334,11 +1334,11 @@ def in_jupyter():
 
 
 def main():
-    global DB, _AURA_RUNNING
+    global DB, _MARS_RUNNING
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     for sub in ("", "files", "photos", "vendor"):
         (DATA_DIR / sub).mkdir(parents=True, exist_ok=True)
-    DB = Database(DATA_DIR / "aura.sqlite3")
+    DB = Database(DATA_DIR / "mars.sqlite3")
     bootstrap_admin()
     ensure_vendor()
     stop_evt = threading.Event()
@@ -1354,10 +1354,10 @@ def main():
         ctx.load_cert_chain(CERT_FILE, KEY_FILE)
         httpd.socket = ctx.wrap_socket(httpd.socket, server_side=True, do_handshake_on_connect=False)
     rt = Runtime(httpd, DB, stop_evt, COND)
-    _AURA_RUNNING = rt
+    _MARS_RUNNING = rt
     threading.Thread(target=cleanup_loop, args=(stop_evt,), daemon=True).start()
     scheme = "https" if SECURE else "http"
-    print("Aura Health: %s://localhost:%d  (центр: %s)" % (scheme, PORT, CENTER_NAME))
+    print("M.A.R.S.: %s://localhost:%d  (центр: %s)" % (scheme, PORT, CENTER_NAME))
     if not SECURE:
         print("Камера и микрофон работают только на https:// и http://localhost. Для центра задайте CERT_FILE и KEY_FILE.")
     if not AUTH_REQUIRED:
@@ -1385,7 +1385,7 @@ INDEX_HTML = r'''<!doctype html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="color-scheme" content="light dark">
-<title>Aura Health</title>
+<title>M.A.R.S.</title>
 <style>
 :root{--bg:#fff;--bg2:#f2f2f7;--bg3:#fff;--fg:#1c1c1e;--fg2:#6c6c70;--sep:#d1d1d6;--acc:#007AFF;--acct:#0062CC;--ok:#34C759;--okt:#1e7e34;--bad:#FF3B30;--badt:#C62828;--warn:#FF9500;--r1:10px;--r2:14px;--fs:15px;--bar:rgba(255,255,255,.72)}
 @media (prefers-color-scheme:dark){:root{--bg:#000;--bg2:#1c1c1e;--bg3:#2c2c2e;--fg:#fff;--fg2:#a1a1a6;--sep:#38383a;--acc:#0A84FF;--acct:#4DA3FF;--okt:#34C759;--badt:#FF6961;--bar:rgba(28,28,30,.72)}}
@@ -1718,7 +1718,7 @@ const Ui = {
     const a = h('a', { href: URL.createObjectURL(new Blob([text], { type: mime || 'application/json' })), download: name });
     document.body.append(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 500);
   },
-  big() { const on = !document.documentElement.classList.contains('big'); document.documentElement.classList.toggle('big', on); try { localStorage.setItem('aura_big', on ? '1' : '0'); } catch (e) { /* без хранилища */ } },
+  big() { const on = !document.documentElement.classList.contains('big'); document.documentElement.classList.toggle('big', on); try { localStorage.setItem('mars_big', on ? '1' : '0'); } catch (e) { /* без хранилища */ } },
   sound() {
     try {
       const AC = window.AudioContext || window.webkitAudioContext; if (!AC) return;
@@ -2108,7 +2108,7 @@ const Poller = {
 const CONSENT_TEXT = 'Я даю согласие на проведение консультации в дистанционной форме (видеосвязь) и на обработку моих персональных данных в объёме, необходимом для оказания медицинской помощи. Я понимаю, что дистанционная консультация не заменяет очный осмотр. Текст согласия задаётся центром.'; // шаблон заменяется юристом центра
 const Session = {
   code: null, hb: null,
-  key() { return 'aura_pt_' + this.code; },
+  key() { return 'mars_pt_' + this.code; },
   askCode(msg) {
     State.set({ role: 'patient', view: 'code' }); Header.update();
     const inp = Ui.input('text', 'Код из приглашения'); inp.maxLength = 8; inp.className += ' mono'; inp.style.cssText = 'text-align:center;font-size:22px;text-transform:uppercase';
@@ -2245,7 +2245,7 @@ const Header = {
   update() {
     if (!this.el) return;
     const v = State.v, inRoom = !!Api.room && v.view === 'call';
-    const kids = [h('div', { class: 'brand' }, Cfg.center, ' ', h('span', { text: 'Aura Health' })), h('div', { class: 'sp' })];
+    const kids = [h('div', { class: 'brand' }, Cfg.center, ' ', h('span', { text: 'M.A.R.S.' })), h('div', { class: 'sp' })];
     kids.push(h('div', { class: 'net', role: 'status' }, h('span', { class: 'dot ' + (v.net ? 'ok' : 'bad') }), h('span', { class: 'only-wide', text: v.net ? 'В сети' : 'Нет связи' })));
     if (inRoom) kids.push(h('div', { class: 'codebox' }, h('span', { class: 'mut', text: 'Код' }), h('span', { class: 'mono', text: Api.room }),
       h('button', { class: 'ibtn', style: 'width:32px;height:32px', 'aria-label': 'Скопировать код сессии', title: 'Скопировать код', onclick: () => Ui.copy(Api.room, 'Код скопирован') }, icon('copy'))));
@@ -2701,7 +2701,7 @@ const Record = {
   },
   exportJson() {
     const p = this.payload(); const a = App.proto.appointment || {};
-    Ui.download('konsultaciya-' + (a.code || 'aura') + '.json', JSON.stringify({ schema: 'aura-health-consultation/1', center: p.center, appointment: { id: a.id, code: a.code, scheduled: a.scheduled }, doctor: p.doctor, patient: this.collectCard(), location: { address: this.loc.address.value, phone: this.loc.phone.value }, conclusion: p.conclusion }, null, 2));
+    Ui.download('konsultaciya-' + (a.code || 'mars') + '.json', JSON.stringify({ schema: 'mars-consultation/1', center: p.center, appointment: { id: a.id, code: a.code, scheduled: a.scheduled }, doctor: p.doctor, patient: this.collectCard(), location: { address: this.loc.address.value, phone: this.loc.phone.value }, conclusion: p.conclusion }, null, 2));
   }
 };
 
@@ -2715,7 +2715,7 @@ const App = {
     Header.update();
   },
   async init() {
-    try { if (localStorage.getItem('aura_big') === '1') document.documentElement.classList.add('big'); } catch (e) { /* ignore */ }
+    try { if (localStorage.getItem('mars_big') === '1') document.documentElement.classList.add('big'); } catch (e) { /* ignore */ }
     this.shell();
     window.addEventListener('online', () => this.setOffline(false));
     window.addEventListener('offline', () => this.setOffline(true));
@@ -2769,7 +2769,7 @@ const App = {
   killed() {
     if (this.dead) return; this.dead = true;
     const doc = State.v.role === 'doctor';
-    try { sessionStorage.removeItem('aura_pt_' + Session.code); } catch (e) { /* ignore */ }
+    try { sessionStorage.removeItem('mars_pt_' + Session.code); } catch (e) { /* ignore */ }
     Poller.stop(); clearInterval(Session.hb); clearInterval(Appointments.timer);
     Rtc.close(); Quality.stop(); FaceMesh.stopAll(); Media.stop(); Ui.closeAudio(); Ui.closeAll(); Loop.stop();
     Api.room = null; Api.token = null; Chat.list = null; Files.box = null; CallUi.r = {};
@@ -2786,7 +2786,7 @@ const App = {
     Poller.stop(); clearInterval(Session.hb); Rtc.close(); Quality.stop(); FaceMesh.stopAll(); Media.stop();
     $('#main').replaceChildren(h('div', { class: 'center-col' }, h('h2', { text: 'Сеанс недоступен' }),
       h('p', { class: 'mut', text: 'Комната не найдена или доступ к ней потерян (возможно, сервер перезапущен).' }),
-      h('button', { class: 'btn pri', onclick: () => { try { sessionStorage.removeItem('aura_pt_' + Session.code); } catch (x) { /* ignore */ } location.reload(); } }, 'Начать заново')));
+      h('button', { class: 'btn pri', onclick: () => { try { sessionStorage.removeItem('mars_pt_' + Session.code); } catch (x) { /* ignore */ } location.reload(); } }, 'Начать заново')));
   },
   async auditSheet() {
     const s = Ui.sheet({ title: 'Журнал аудита', wide: true });
@@ -3183,7 +3183,7 @@ Object.assign(FaceMesh, {
     this.Overlay.init();
     this.frameFn = Loop.add(() => { this.Overlay.frame(); this.autoFrame(); });
     if (this.role === 'patient') {
-      try { this.consent = sessionStorage.getItem('aura_fc_' + Api.room) === '1'; } catch (e) { this.consent = false; }
+      try { this.consent = sessionStorage.getItem('mars_fc_' + Api.room) === '1'; } catch (e) { this.consent = false; }
       this.sendConsent(); this.timers.push(setInterval(() => this.sendConsent(), 10000));
     }
     this.timers.push(setInterval(() => this.statusTick(), 500));
@@ -3225,7 +3225,7 @@ Object.assign(FaceMesh, {
         actions: [{ label: 'Не согласен(на)', kind: 'sec', onClick: () => fin(false) }, {
           label: 'Согласен(на)', kind: 'pri', onClick: async () => {
             this.consent = true;
-            try { sessionStorage.setItem('aura_fc_' + Api.room, '1'); } catch (e) { /* ignore */ }
+            try { sessionStorage.setItem('mars_fc_' + Api.room, '1'); } catch (e) { /* ignore */ }
             try { await Api.ev('control', { action: 'face_consent', granted: true }); } catch (e) { Toast.err(e); }
             this.sendConsent(); this.refreshPanes(); fin(true);
           }
@@ -3239,7 +3239,7 @@ Object.assign(FaceMesh, {
   },
   async revoke() {
     this.consent = false; this.stopTrackers(); this.mode = 'off'; this.coach = false;
-    try { sessionStorage.removeItem('aura_fc_' + Api.room); } catch (e) { /* ignore */ }
+    try { sessionStorage.removeItem('mars_fc_' + Api.room); } catch (e) { /* ignore */ }
     try { await Api.ev('control', { action: 'face_consent', granted: false }); } catch (e) { Toast.err(e); }
     this.sendConsent(); this.els.hint.textContent = ''; this.els.pq.classList.add('hidden'); this.refreshPanes();
   },
