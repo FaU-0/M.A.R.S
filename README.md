@@ -1,4 +1,3 @@
-[README.md](https://github.com/user-attachments/files/33889375/README.md)
 # M.A.R.S.
 
 **Mobility & Asymmetry Reporting Sessions**: приложение для связи в локальной сети с функциями оценки подвижности лица, анализа асимметрии лица и составления отчётов по сеансу.
