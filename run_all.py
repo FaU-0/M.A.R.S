@@ -12,7 +12,6 @@ Ctrl+C останавливает всё.
 import argparse
 import os
 import secrets
-import signal
 import subprocess
 import sys
 import time
@@ -52,11 +51,6 @@ def main():
     def start(n):
         procs[n] = subprocess.Popen(cmd(n), cwd=str(ROOT), env=env)
         started[n] = time.time()
-
-    def on_term(*_):  # SIGTERM тоже останавливает дочерние сервисы, иначе они остаются сиротами
-        raise KeyboardInterrupt
-
-    signal.signal(signal.SIGTERM, on_term)
 
     for n in secondary:  # сначала вторичные, gateway последним
         start(n)

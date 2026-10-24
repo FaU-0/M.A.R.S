@@ -17,43 +17,7 @@ const deg = r => r * 180 / Math.PI;
 const FaceMesh = {
   role: null, consent: false, mode: 'off', coach: false, autocrop: false, secondary: false, tol: 5, poses: ['frontal', 'left45', 'right45', 'left90', 'right90'],
   trk: null, trk2: null, els: {}, cal: null, latest: {}, info: null, unavailable: '', busy: 0, subs: new Set(), lastAssess: 0, lastSend: 0, motion: [], timers: [], photos: [], dpr: 1, sizes: new Map(), accent: '#007AFF', accT: 0,
-  Loader: {}, Overlay: {}, Pose: {}, Symmetry: {}, Mobility: {}, Capture: {}, Compare: {}, Calibrate: {}, Privacy: {}, Report: {}, Remote: {}
-};
-
-/* --- Remote: расчёт метрик в сервисе vision через очередь заданий gateway.
-   Если сервис недоступен или не успел ответить, используется расчёт на устройстве. --- */
-FaceMesh.Remote = {
-  WAIT: 6000, down: false,
-  /* компактный кадр: только нужные точки и коэффициенты */
-  pack(cur, idx, names) {
-    const lm = {}, bs = {};
-    if (idx) for (const i of idx) { const p = cur.lm[i]; if (p) lm[i] = [p.x, p.y, p.z]; }
-    if (cur.bs) for (const c of cur.bs) if (!names || names.includes(c.categoryName)) bs[c.categoryName] = c.score;
-    return { lm, mat: cur.mat ? Array.from(cur.mat) : null, bs, vw: cur.vw, vh: cur.vh, multi: !!cur.multi };
-  },
-  key() { return crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36) + Math.random().toString(36).slice(2, 12); },
-  /* результат vision или null; ошибка расчёта (например, мало кадров) пробрасывается */
-  async run(kind, input, signal) {
-    if (!Api.room) return null;
-    let job;
-    try { job = await Api.post('/rooms/' + Api.room + '/analyze', { kind, key: this.key(), input }, { signal }); }
-    catch (e) { if (e && e.name === 'AbortError') throw e; if (!(e && e.status === 503)) console.warn('vision', e); return null; }
-    const t0 = performance.now();
-    while (job.status === 'queued' || job.status === 'running') {
-      if (performance.now() - t0 > this.WAIT) return null;
-      await new Promise(r => setTimeout(r, 400));
-      job = await Api.get('/rooms/' + Api.room + '/jobs/' + job.id, { signal }).catch(e => { if (e && e.name === 'AbortError') throw e; return job; });
-    }
-    if (job.status === 'done') return job.result;
-    throw new Error((job.error && job.error.message) || 'Ошибка анализа');
-  },
-  async pick(kind, input, local, signal, downMsg) {
-    const r = await this.run(kind, input, signal);
-    if (r) { this.down = false; r.source = 'vision'; return r; }
-    if (!this.down) Toast.show(downMsg || 'Сервис анализа временно недоступен: расчёт выполнен на этом устройстве');
-    this.down = true; local.source = 'device';
-    return local;
-  }
+  Loader: {}, Overlay: {}, Pose: {}, Symmetry: {}, Mobility: {}, Capture: {}, Compare: {}, Calibrate: {}, Privacy: {}, Report: {}
 };
 
 /* --- Loader: локальные файлы MediaPipe с /vendor --- */
@@ -311,19 +275,18 @@ FaceMesh.Symmetry = {
     const F = FaceMesh, trk = F.trk, secs = 2.5, need = 12;
     return new Promise((res, rej) => {
       if (!trk) return rej(new Error('Модуль не запущен'));
-      const S = [], FR = []; let t0 = 0, fail = null; const t00 = performance.now();
+      const S = []; let t0 = 0, fail = null; const t00 = performance.now();
       const fn = cur => {
         if (signal && signal.aborted) { done(new Error('Отменено')); return; }
         const e = F.Pose.euler(cur);
-        if (!F.Pose.inTol(e, F.tol) || cur.multi && false) { t0 = 0; S.length = 0; FR.length = 0; onProgress(0, 'Выровняйте голову: ' + (e ? 'yaw ' + e.yaw.toFixed(0) + ', pitch ' + e.pitch.toFixed(0) + ', roll ' + e.roll.toFixed(0) : '')); return; }
+        if (!F.Pose.inTol(e, F.tol) || cur.multi && false) { t0 = 0; S.length = 0; onProgress(0, 'Выровняйте голову: ' + (e ? 'yaw ' + e.yaw.toFixed(0) + ', pitch ' + e.pitch.toFixed(0) + ', roll ' + e.roll.toFixed(0) : '')); return; }
         if (!t0) t0 = performance.now();
-        const v = this.one(cur); if (v) { S.push(v); FR.push(F.Remote.pack(cur, this.IDX, [])); }
+        const v = this.one(cur); if (v) S.push(v);
         const p = Math.min(1, (performance.now() - t0) / (secs * 1000)); onProgress(p, 'Держите позу');
-        if (p >= 1) { if (S.length >= need) done(null); else { t0 = 0; S.length = 0; FR.length = 0; } }
+        if (p >= 1) { if (S.length >= need) done(null); else { t0 = 0; S.length = 0; } }
       };
-      const tm = setInterval(() => { if (performance.now() - t00 > 25000) done(new Error('Не удалось получить устойчивую позу в допуске за отведённое время')); else if (trk.lost()) { t0 = 0; S.length = 0; FR.length = 0; onProgress(0, 'Лицо не найдено'); } }, 400);
-      /* кадры для сервиса vision: неперечисляемое поле, в протокол не попадает */
-      const done = err => { clearInterval(tm); F.subs.delete(fn); if (err) return rej(err); const out = this.build(S, F.cal); Object.defineProperty(out, '_frames', { value: FR }); res(out); };
+      const tm = setInterval(() => { if (performance.now() - t00 > 25000) done(new Error('Не удалось получить устойчивую позу в допуске за отведённое время')); else if (trk.lost()) { t0 = 0; S.length = 0; onProgress(0, 'Лицо не найдено'); } }, 400);
+      const done = err => { clearInterval(tm); F.subs.delete(fn); if (err) rej(err); else res(this.build(S, F.cal)); };
       F.subs.add(fn);
     });
   }
@@ -345,10 +308,9 @@ FaceMesh.Mobility = {
     const F = FaceMesh, secs = 4, tol = Math.max(F.tol * 2, 10);
     return new Promise((res, rej) => {
       if (!F.trk) return rej(new Error('Модуль не запущен'));
-      const t0 = performance.now(), FR = [], names = task.single ? [task.single] : [task.r, task.l]; let mr = 0, ml = 0, ms = 0, n = 0;
+      const t0 = performance.now(); let mr = 0, ml = 0, ms = 0, n = 0;
       const fn = cur => {
         if (signal && signal.aborted) { fin(new Error('Отменено')); return; }
-        if (FR.length < 400) FR.push(F.Remote.pack(cur, [LM.REO, LM.LEO, LM.NOSE], names));
         const e = F.Pose.euler(cur);
         if (!F.Pose.inTol(e, tol)) { onProgress((performance.now() - t0) / (secs * 1000), 'Смотрите в камеру'); return; }
         n++;
@@ -362,7 +324,6 @@ FaceMesh.Mobility = {
         if (n < 10) return rej(new Error('Недостаточно кадров с лицом в допустимой позе. Повторите задание.'));
         const o = { id: task.id, label: task.label };
         if (task.single) o.single = ms; else { o.right = mr; o.left = ml; o.ratio = Math.max(mr, ml) > 0.05 ? Math.min(mr, ml) / Math.max(mr, ml) : null; }
-        Object.defineProperty(o, '_frames', { value: FR });
         res(o);
       };
       F.subs.add(fn);
