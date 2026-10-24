@@ -1,4 +1,0 @@
-# M.A.R.S. requirements
-# The core application uses only Python standard library modules.
-# MediaPipe assets are downloaded automatically at runtime into DATA_DIR/vendor.
-# No third-party Python packages are required for normal project use.
