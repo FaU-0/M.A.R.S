@@ -12,18 +12,19 @@ Ctrl+C останавливает всё.
 import argparse
 import os
 import secrets
+import signal
 import subprocess
 import sys
 import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
-SECONDARY = ["vision", "reports", "speech", "assistant"]
+SECONDARY = ["database", "vision", "reports", "speech", "assistant"]  # database первым: gateway ждёт его при запуске
 
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--only", default="", help="через запятую: gateway,vision,reports,speech,assistant")
+    ap.add_argument("--only", default="", help="через запятую: gateway,database,vision,reports,speech,assistant")
     ap.add_argument("--without", default="", help="сервисы, которые не запускать")
     a = ap.parse_args()
 
@@ -43,7 +44,8 @@ def main():
     def cmd(n):
         if n == "gateway":
             return [sys.executable, str(ROOT / "gateway" / "mars.py")]
-        return [sys.executable, "-m", n + ".main"]
+        venv = ROOT / n / ".venv" / "bin" / "python"  # у тяжёлого сервиса может быть своё окружение (speech: faster-whisper)
+        return [str(venv) if venv.exists() else sys.executable, "-m", n + ".main"]
 
     procs = {}
     started = {}
@@ -51,6 +53,11 @@ def main():
     def start(n):
         procs[n] = subprocess.Popen(cmd(n), cwd=str(ROOT), env=env)
         started[n] = time.time()
+
+    def on_term(*_):  # SIGTERM тоже останавливает дочерние сервисы, иначе они остаются сиротами
+        raise KeyboardInterrupt
+
+    signal.signal(signal.SIGTERM, on_term)
 
     for n in secondary:  # сначала вторичные, gateway последним
         start(n)

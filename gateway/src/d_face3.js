@@ -211,18 +211,20 @@ FaceMesh.Compare = {
       try { this.l.close(); } catch (e) { /* ignore */ } this.l = null;
       if (closed) return;
       if (!A || !B) { body.replaceChildren(h('p', { text: 'Лицо не найдено на ' + (!A && !B ? 'обоих снимках' : (!A ? 'снимке «до»' : 'снимке «после»')) + '. Если снимок был сохранён со скрытым лицом, сравнить его нельзя.' })); return; }
-      this.show(body, s, ia, ib, A, B, before, after, pose);
+      const loc = this.calc(A, B, pose, F.tol, F.cal), side = (X, p) => ({ id: p.id, ts: p.ts, frame: F.Remote.pack(X, this.IDX, []) });
+      const R = await F.Remote.pick('compare', { before: side(A, before), after: side(B, after), pose, tolerance: F.tol, calibration: F.cal }, loc, null,
+        'Анализ временно недоступен, снимок сохранён и будет обработан позже. Сейчас показан расчёт на этом устройстве');
+      if (closed) return;
+      this.show(body, s, ia, ib, R, before, after, pose);
     } catch (e) { console.error(e); if (!closed) body.replaceChildren(h('p', { text: 'Не удалось выполнить сравнение: ' + ((e && e.message) || 'ошибка') })); }
   },
-  show(body, sheet, ia, ib, A, B, before, after, pose) {
-    const F = FaceMesh, tgt = POSE_YAW[pose], tol = F.tol, mm = pose === 'frontal' && F.cal && F.cal.ipd_mm ? F.cal : null;
+  IDX: [33, 133, 362, 263, 6, 1, 168, 10, 105, 334, 61, 291, 152, 468, 473],
+  /* расчёт сравнения по точкам двух снимков; тот же результат отдаёт сервис vision (/v1/compare) */
+  calc(A, B, pose, tol, cal) {
+    const F = FaceMesh, tgt = POSE_YAW[pose], mm = pose === 'frontal' && cal && cal.ipd_mm ? cal : null;
     const chk = X => { const e = F.Pose.euler(X); if (!e) return { ok: false, e: null }; const dy = pose === 'frontal' ? Math.abs(e.yaw) : Math.abs(Math.abs(e.yaw) - Math.abs(tgt)); return { ok: dy <= tol && Math.abs(e.pitch) <= tol && Math.abs(e.roll) <= tol, e }; };
     const ca = chk(A), cb = chk(B), poseOk = ca.ok && cb.ok && !!A.mat && !!B.mat;
     const T = this.procrustes(A, B);
-    const W = ia.naturalWidth, H = ia.naturalHeight;
-    const cv = document.createElement('canvas'); cv.width = W; cv.height = H; cv.setAttribute('aria-label', 'Сравнение снимков до и после');
-    const ctx = cv.getContext('2d');
-    const st = { mode: 'wipe', pos: 50, arrows: true };
     /* нормировка: по МЗР для анфаса, по высоте лица для остальных ракурсов */
     const dist = (X, i, j) => Math.hypot((X.lm[i].x - X.lm[j].x) * X.vw, (X.lm[i].y - X.lm[j].y) * X.vh);
     const normName = pose === 'frontal' ? 'ipd' : 'face_height', norm = normName === 'ipd' ? dist(A, 468, 473) : dist(A, 10, 152);
@@ -233,6 +235,14 @@ FaceMesh.Compare = {
       if (mm) { o.dx_mm = dx * mm.ipd_mm; o.dy_mm = dy * mm.ipd_mm; }
       return o;
     });
+    return { kind: 'compare', pose, tolerance: tol, T, rows, ca, cb, pose_ok: poseOk, norm: normName, mm, multi: [!!A.multi, !!B.multi] };
+  },
+  show(body, sheet, ia, ib, R, before, after, pose) {
+    const F = FaceMesh, tol = R.tolerance, mm = R.mm, T = R.T, rows = R.rows, ca = R.ca, cb = R.cb, poseOk = R.pose_ok, normName = R.norm;
+    const W = ia.naturalWidth, H = ia.naturalHeight;
+    const cv = document.createElement('canvas'); cv.width = W; cv.height = H; cv.setAttribute('aria-label', 'Сравнение снимков до и после');
+    const ctx = cv.getContext('2d');
+    const st = { mode: 'wipe', pos: 50, arrows: true };
     const render = () => {
       ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.clearRect(0, 0, W, H); ctx.globalAlpha = 1;
       ctx.drawImage(ia, 0, 0, W, H);
@@ -260,14 +270,14 @@ FaceMesh.Compare = {
       rows.map(r => h('tr', null, h('td', { text: r.label }), h('td', { class: 'n', text: f(mm ? r.dx_mm : r.dx) }), h('td', { class: 'n', text: f(mm ? r.dy_mm : r.dy) }))));
     const warn = [];
     if (!poseOk) warn.push('Поза на одном или обоих снимках вне допуска ' + tol + ' градусов от цели (до: ' + (ca.e ? 'yaw ' + ca.e.yaw.toFixed(0) + ', pitch ' + ca.e.pitch.toFixed(0) + ', roll ' + ca.e.roll.toFixed(0) : 'нет данных') + '; после: ' + (cb.e ? 'yaw ' + cb.e.yaw.toFixed(0) + ', pitch ' + cb.e.pitch.toFixed(0) + ', roll ' + cb.e.roll.toFixed(0) : 'нет данных') + '). Результат ориентировочный и в протокол не сохраняется.');
-    if (A.multi || B.multi) warn.push('На снимке найдено более одного лица: использовано самое крупное.');
+    if (R.multi && (R.multi[0] || R.multi[1])) warn.push('На снимке найдено более одного лица: использовано самое крупное.');
     if (pose === 'frontal' && !mm) warn.push('Калибровки нет: значения даны в долях межзрачкового расстояния, не в миллиметрах.');
     if (mm && mm.approx) warn.push('Калибровка по радужке приблизительная: миллиметры ориентировочные. Для точности используйте калибровку по карте.');
     if (pose !== 'frontal') warn.push('Для ракурса, отличного от анфаса, миллиметры не показываются: расстояния искажены поворотом.');
     const msg = h('div', { class: 'stack' }, warn.map(w => h('div', { class: 'banner warn', style: 'border-radius:10px', text: w })));
     const saveBtn = h('button', { class: 'btn pri', disabled: !poseOk || null, onclick: async e => {
       e.target.disabled = true;
-      const payload = { kind: 'compare', pose_ok: true, pose, before_id: before.id, after_id: after.id, before_ts: before.ts, after_ts: after.ts, norm: normName, scale: T.scale, rotation_deg: T.angle, tolerance: tol, rows: rows.map(r => { const o = { id: r.id, label: r.label, dx: r.dx, dy: r.dy }; if (mm) { o.dx_mm = r.dx_mm; o.dy_mm = r.dy_mm; } return o; }), ts: Math.floor(Date.now() / 1000) };
+      const payload = { kind: 'compare', pose_ok: true, source: R.source, pose, before_id: before.id, after_id: after.id, before_ts: before.ts, after_ts: after.ts, norm: normName, scale: T.scale, rotation_deg: T.angle, tolerance: tol, rows: rows.map(r => { const o = { id: r.id, label: r.label, dx: r.dx, dy: r.dy }; if (mm) { o.dx_mm = r.dx_mm; o.dy_mm = r.dy_mm; } return o; }), ts: Math.floor(Date.now() / 1000) };
       if (mm) payload.calibration = mm;
       try { await Api.post('/rooms/' + Api.room + '/measurements', payload); F.hist = null; Toast.show('Сравнение сохранено в протокол'); } catch (er) { Toast.err(er); e.target.disabled = false; }
     } }, 'Сохранить в протокол');
@@ -294,6 +304,12 @@ FaceMesh.Report = {
     const rep = { kind: 'report', center: a.center || Cfg.center, patient: a.patient_name || '', doctor: a.doctor || '', appointment_id: a.id, date: fmtDT(Math.floor(Date.now() / 1000)), ts: Math.floor(Date.now() / 1000), symmetry: sym || null, mobility: mob || null, compare: cmpList, photo_ids: F.photos.map(p => ({ id: p.id, pose: p.pose, ts: p.ts })) };
     const cal = (sym && sym.calibration) || (cmpList.find(c => c.calibration) || {}).calibration || F.cal;
     if (cal) rep.calibration = cal;
+    /* ход консультации: только обезличенный текст, проверенный врачом */
+    try {
+      const tr = await Api.get('/rooms/' + Api.room + '/transcript');
+      if (tr.deid && tr.deid.status === 'done' && tr.deid.confirmed) rep.transcript = { segments: tr.deid.segments.map(g => ({ role: g.role, t: g.t, text: g.text })) };
+      else if (tr.deid && tr.deid.status !== 'none') rep.transcript_note = 'Расшифровка не включена: обезличенный текст ещё не проверен врачом.';
+    } catch (e) { /* расшифровки нет или сервис недоступен: раздел не выводится */ }
     return { rep, hist };
   },
   async make(out) {
@@ -317,6 +333,11 @@ FaceMesh.Report = {
       kids.push(h('h2', { text: 'Сравнение до и после: ' + (POSE_NAMES[c.pose] || c.pose) }), h('p', { text: 'До: ' + fmtDT(c.before_ts) + '. После: ' + fmtDT(c.after_ts) + '. Единицы: ' + (c.norm === 'ipd' ? (mm ? 'мм' : 'доли МЗР') : 'доли высоты лица') + '.' }),
         h('table', { class: 'tb' }, h('tr', null, h('th', { text: 'Точка' }), h('th', { class: 'n', text: 'По горизонтали' }), h('th', { class: 'n', text: 'По вертикали' })), c.rows.map(r => h('tr', null, h('td', { text: r.label }), h('td', { class: 'n', text: f(mm ? r.dx_mm : r.dx) }), h('td', { class: 'n', text: f(mm ? r.dy_mm : r.dy) })))));
     }
+    if (rep.transcript && rep.transcript.segments.length) {
+      const t0 = rep.transcript.segments[0].t;
+      kids.push(h('h2', { text: 'Ход консультации' }), h('p', { class: 'sm', text: 'Обезличенная расшифровка речи, проверена врачом. Метки в квадратных скобках скрывают личные данные.' }),
+        h('table', { class: 'tb' }, rep.transcript.segments.map(g => { const s = Math.max(0, Math.round((g.t - t0) / 1000)); return h('tr', null, h('td', { class: 'n', text: pad2(Math.floor(s / 60)) + ':' + pad2(s % 60) }), h('td', { text: g.role === 'doctor' ? 'Врач' : 'Пациент' }), h('td', { text: g.text })); })));
+    }
     if (rep.photo_ids.length) { kids.push(h('h2', { text: 'Снимки приёма' }), h('div', { class: 'thumbs' }, rep.photo_ids.map(p => F.thumbEl(p)))); }
     kids.push(h('p', { class: 'sm', text: 'Документ содержит числовые наблюдения для документирования. Он не является диагнозом и не заменяет клинической оценки врача. ' + SIGN_SYM + '. ' + SIGN_MOB + '.' }),
       h('div', { class: 'sign', text: 'Подпись врача ______________________ / ' + rep.doctor + ' /' }));
@@ -324,9 +345,9 @@ FaceMesh.Report = {
   },
   show(out, rp) {
     const F = FaceMesh, rep = rp.rep;
-    const none = !rep.symmetry && !rep.mobility && !(rep.compare && rep.compare.length) && !rep.photo_ids.length;
+    const none = !rep.symmetry && !rep.mobility && !(rep.compare && rep.compare.length) && !rep.photo_ids.length && !rep.transcript;
     out.replaceChildren(
-      h('p', { class: 'note', style: 'margin:0', text: 'Отчёт сформирован ' + rep.date + '. Симметрия: ' + (rep.symmetry ? 'есть' : 'нет') + '; подвижность: ' + (rep.mobility ? 'есть' : 'нет') + '; сравнений: ' + (rep.compare || []).length + '; снимков: ' + rep.photo_ids.length + '; графиков: ' + (rp.trends || []).length + '.' }),
+      h('p', { class: 'note', style: 'margin:0', text: 'Отчёт сформирован ' + rep.date + '. Симметрия: ' + (rep.symmetry ? 'есть' : 'нет') + '; подвижность: ' + (rep.mobility ? 'есть' : 'нет') + '; сравнений: ' + (rep.compare || []).length + '; снимков: ' + rep.photo_ids.length + '; графиков: ' + (rp.trends || []).length + '; расшифровка: ' + (rep.transcript ? 'есть (обезличена)' : rep.transcript_note ? 'не проверена' : 'нет') + '.' }),
       ...(none ? [h('div', { class: 'banner warn', style: 'border-radius:10px', text: 'В этом приёме пока нет данных для отчёта.' })] : []),
       h('div', { class: 'row wrap' },
         h('button', { class: 'btn pri', onclick: async () => {

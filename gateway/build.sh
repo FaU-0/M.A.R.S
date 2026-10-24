@@ -1,7 +1,7 @@
 #!/bin/bash
 # Собирает gateway/mars.py из исходников в src/
 cd "$(dirname "$0")/src"
-{ cat a_server.py; printf '\n\nINDEX_HTML = r'"'''"; cat b_head.html c_js1.js c_js2.js c_js3.js d_face1.js d_face2.js d_face3.js; printf '\nApp.init();\n</script></body></html>'"'''"'\n\n\nif __name__ == "__main__":\n    main()\n'; } > ../mars.py
+{ cat a_server.py; printf '\n\nINDEX_HTML = r'"'''"; cat b_head.html c_js1.js c_js2.js c_js3.js d_face1.js d_face2.js d_face3.js e_speech.js f_transcript.js; printf '\nApp.init();\n</script></body></html>'"'''"'\n\n\nif __name__ == "__main__":\n    main()\n'; } > ../mars.py
 cd ..
 python3 -m py_compile mars.py && echo PYOK
 python3 - <<'PY'

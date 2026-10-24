@@ -7,6 +7,7 @@ M.A.R.S. - Mobility & Asymmetry Reporting Sessions: связь в локальн
 """
 import base64
 import hashlib
+import heapq
 import hmac
 import http.cookies
 import json
@@ -18,7 +19,6 @@ import secrets
 import smtplib
 import socket
 import socketserver  # noqa: F401  (ThreadingHTTPServer построен на нём)
-import sqlite3
 import ssl
 import sys
 import threading
@@ -202,68 +202,71 @@ def ip_limit(ip, kind, cap, rate):
 # ----------------------------------------------------------------------------
 # База данных
 # ----------------------------------------------------------------------------
-SCHEMA = """
-CREATE TABLE IF NOT EXISTS doctors(id INTEGER PRIMARY KEY, login TEXT UNIQUE NOT NULL, name TEXT NOT NULL,
-  salt BLOB NOT NULL, pw BLOB NOT NULL, is_admin INTEGER NOT NULL DEFAULT 0, created INTEGER NOT NULL);
-CREATE TABLE IF NOT EXISTS sessions(sid TEXT PRIMARY KEY, doctor_id INTEGER NOT NULL, expires INTEGER NOT NULL);
-CREATE TABLE IF NOT EXISTS patients(id INTEGER PRIMARY KEY, full_name TEXT NOT NULL, birth TEXT DEFAULT '',
-  sex TEXT DEFAULT '', blood TEXT DEFAULT '', allergies TEXT DEFAULT '', chronic TEXT DEFAULT '',
-  meds TEXT DEFAULT '', complaints TEXT DEFAULT '', email TEXT DEFAULT '', created INTEGER NOT NULL);
-CREATE TABLE IF NOT EXISTS appointments(id INTEGER PRIMARY KEY, code TEXT UNIQUE NOT NULL, patient_id INTEGER,
-  doctor_id INTEGER, scheduled INTEGER NOT NULL, status TEXT NOT NULL DEFAULT 'planned',
-  protocol TEXT NOT NULL DEFAULT '{}', started INTEGER, ended INTEGER, created INTEGER NOT NULL);
-CREATE TABLE IF NOT EXISTS messages(id INTEGER PRIMARY KEY, appt_id INTEGER NOT NULL, ts INTEGER NOT NULL,
-  sender TEXT NOT NULL, kind TEXT NOT NULL, body TEXT NOT NULL);
-CREATE TABLE IF NOT EXISTS notes(appt_id INTEGER PRIMARY KEY, body TEXT NOT NULL DEFAULT '', updated INTEGER);
-CREATE TABLE IF NOT EXISTS conclusions(appt_id INTEGER PRIMARY KEY, body TEXT NOT NULL, updated INTEGER NOT NULL);
-CREATE TABLE IF NOT EXISTS files(id INTEGER PRIMARY KEY, appt_id INTEGER NOT NULL, ts INTEGER NOT NULL,
-  sender TEXT NOT NULL, name TEXT NOT NULL, mime TEXT NOT NULL, size INTEGER NOT NULL, path TEXT NOT NULL DEFAULT '');
-CREATE TABLE IF NOT EXISTS photos(id INTEGER PRIMARY KEY, appt_id INTEGER NOT NULL, patient_id INTEGER,
-  pose TEXT NOT NULL, ts INTEGER NOT NULL, size INTEGER NOT NULL, path TEXT NOT NULL DEFAULT '');
-CREATE TABLE IF NOT EXISTS measurements(id INTEGER PRIMARY KEY, appt_id INTEGER NOT NULL, patient_id INTEGER,
-  kind TEXT NOT NULL, ts INTEGER NOT NULL, body TEXT NOT NULL);
-CREATE TABLE IF NOT EXISTS audit(id INTEGER PRIMARY KEY, ts INTEGER NOT NULL, actor TEXT NOT NULL,
-  action TEXT NOT NULL, room TEXT DEFAULT '', detail TEXT DEFAULT '');
-CREATE INDEX IF NOT EXISTS ix_photos_patient ON photos(patient_id, pose, ts);
-CREATE INDEX IF NOT EXISTS ix_meas_patient ON measurements(patient_id, ts);
-"""
+# Gateway SQL не содержит: все запросы лежат в database/queries.py и вызываются по имени.
+# С сервисом database (run_all.py) запросы идут к нему по HTTP; в одиночном режиме (python gateway/mars.py)
+# тот же код хранилища работает внутри процесса.
+try:
+    from database.store import Store as _Store, decode as _db_decode, encode as _db_encode
+except Exception:  # noqa: BLE001
+    _Store = None
 
 
-class Database:
+class DatabaseUnavailable(Exception):
+    """Сервис database не ответил: запрос получает 503, сигнализация звонка продолжает работать."""
+
+
+class LocalDB:
     def __init__(self, path):
-        self.lock = threading.RLock()
-        self.conn = sqlite3.connect(str(path), check_same_thread=False, isolation_level=None)
-        self.conn.row_factory = sqlite3.Row
-        with self.lock:
-            try:
-                self.conn.execute("PRAGMA journal_mode=WAL")
-            except sqlite3.DatabaseError:
-                pass
-            self.conn.executescript(SCHEMA)
+        self.store = _Store(path)
 
-    def q(self, sql, args=()):
-        with self.lock:
-            return [dict(r) for r in self.conn.execute(sql, args).fetchall()]
+    def call(self, name, args=()):
+        return self.store.call(name, list(args))
 
-    def one(self, sql, args=()):
-        rows = self.q(sql, args)
-        return rows[0] if rows else None
-
-    def run(self, sql, args=()):
-        with self.lock:
-            return self.conn.execute(sql, args).lastrowid
+    q = one = run = call
 
     def close(self):
-        with self.lock:
+        self.store.close()
+
+
+class RemoteDB:
+    def __init__(self):
+        self.cli = _ServiceClient("database", threshold=3, probe_every=2.0)
+
+    def call(self, name, args=()):
+        try:
+            st, data = self.cli.call("POST", "/v1/q", {"name": name, "args": _db_encode(list(args))}, timeout=5.0)
+        except Exception as e:  # noqa: BLE001  (ServiceUnavailable: сбой, таймаут, выключатель цепи)
+            raise DatabaseUnavailable(str(e))
+        if st != 200 or not isinstance(data, dict):
+            raise RuntimeError("database %s: %s" % (st, (data or {}).get("message")))
+        return _db_decode(data.get("result"))
+
+    q = one = run = call
+
+    def close(self):
+        pass
+
+
+def open_db():
+    if _svc_config is not None and _ServiceClient is not None and "database" in _svc_config.monitored_services():
+        db = RemoteDB()
+        t = time.time()
+        while True:  # run_all запускает database вместе с gateway: ждём, пока он поднимет базу
             try:
-                self.conn.close()
-            except Exception:
-                pass
+                db.one("doctors.admin_password")
+                return db
+            except DatabaseUnavailable:
+                if time.time() - t > 120:
+                    raise
+                time.sleep(0.5)
+    if _Store is None:
+        raise SystemExit("Нет папки database рядом с gateway: без неё база недоступна")
+    return LocalDB(DATA_DIR / "mars.sqlite3")
 
 
 def audit(actor, action, room="", detail=""):
     try:
-        DB.run("INSERT INTO audit(ts,actor,action,room,detail) VALUES(?,?,?,?,?)",
+        DB.run("audit.add",
                (now(), actor, action, room, clean_text(detail, 200)))
     except Exception:
         log.exception("audit")
@@ -275,7 +278,7 @@ def hash_pw(pw, salt):
 
 def create_doctor(login, name, password, is_admin=0):
     salt = secrets.token_bytes(16)
-    return DB.run("INSERT INTO doctors(login,name,salt,pw,is_admin,created) VALUES(?,?,?,?,?,?)",
+    return DB.run("doctors.add",
                   (login, name, salt, hash_pw(password, salt), is_admin, now()))
 
 
@@ -295,13 +298,13 @@ def bootstrap_admin():
         os.chmod(str(pfile), 0o600)
     except OSError:
         pass
-    row = DB.one("SELECT id, salt, pw FROM doctors WHERE login='admin'")
+    row = DB.one("doctors.admin_password")
     if not row:
         create_doctor("admin", "Администратор", pw, 1)
     elif not hmac.compare_digest(bytes(row["pw"]), hash_pw(pw, bytes(row["salt"]))):
         salt = secrets.token_bytes(16)
-        DB.run("UPDATE doctors SET salt=?, pw=?, is_admin=1 WHERE id=?", (salt, hash_pw(pw, salt), row["id"]))
-        DB.run("DELETE FROM sessions WHERE doctor_id=?", (row["id"],))
+        DB.run("doctors.set_admin_password", (salt, hash_pw(pw, salt), row["id"]))
+        DB.run("sessions.delete_for_doctor", (row["id"],))
     print("=" * 64)
     print("Вход администратора.  Логин: admin   Пароль: %s" % pw)
     print("Пароль хранится в файле %s" % pfile)
@@ -360,7 +363,7 @@ def add_event(room, typ, sender, to, data):
 def new_code():
     for _ in range(50):
         code = "".join(secrets.choice(ROOM_ALPHABET) for _ in range(6))
-        if not DB.one("SELECT id FROM appointments WHERE code=?", (code,)) and code not in ROOMS:
+        if not DB.one("appointments.id_by_code", (code,)) and code not in ROOMS:
             return code
     raise ApiError(500, "internal", "Не удалось создать код")
 
@@ -371,7 +374,7 @@ def get_room(code, create=False):
         r = ROOMS.get(code)
         if r:
             return r
-    appt = DB.one("SELECT id,status FROM appointments WHERE code=?", (code,))
+    appt = DB.one("appointments.status_by_code", (code,))
     if not appt:
         raise ApiError(404, "room_not_found", "Комната не найдена")
     if appt["status"] == "completed":
@@ -409,7 +412,10 @@ def cleanup_loop(stop_evt):
             with COND:
                 for code in [c for c, r in ROOMS.items() if t - r.last > ROOM_TTL]:
                     del ROOMS[code]
-            DB.run("DELETE FROM sessions WHERE expires<?", (now(),))
+            DB.run("sessions.delete_expired", (now(),))
+            jobs_cleanup()
+        except DatabaseUnavailable:
+            pass  # база недоступна: уборка подождёт до следующего круга
         except Exception:
             log.exception("cleanup")
 
@@ -446,7 +452,10 @@ def has_mm_keys(obj):
 
 
 def appt_by_room(room):
-    return DB.one("SELECT * FROM appointments WHERE id=?", (room.appt_id,))
+    return DB.one("appointments.by_id", (room.appt_id,))
+
+
+PROTO_LOCK = threading.Lock()
 
 
 def load_protocol_json(appt):
@@ -456,26 +465,38 @@ def load_protocol_json(appt):
         return {}
 
 
+def set_speech(appt, **kw):
+    """Состояние расшифровки в протоколе приёма: consent (согласие пациента), active (идёт запись)."""
+    with PROTO_LOCK:
+        row = DB.one("appointments.protocol", (appt["id"],)) or {}
+        proto = load_protocol_json(row)
+        sp = dict(proto.get("speech") or {})
+        sp.update(kw)
+        sp["ts"] = now()
+        proto["speech"] = sp
+        DB.run("appointments.set_protocol", (json.dumps(proto, ensure_ascii=False), appt["id"]))
+    return sp
+
+
 def save_card(appt, card):
     vals = {k: clean_text(card.get(k), 2000) for k in CARD_FIELDS if k in card}
     pid = appt["patient_id"]
     if pid is None:
         name = vals.get("full_name") or "Без имени"
-        pid = DB.run("INSERT INTO patients(full_name,created) VALUES(?,?)", (name, now()))
-        DB.run("UPDATE appointments SET patient_id=? WHERE id=?", (pid, appt["id"]))
+        pid = DB.run("patients.add", (name, now()))
+        DB.run("appointments.set_patient", (pid, appt["id"]))
     if vals:
         if "full_name" in vals and not vals["full_name"]:
             vals.pop("full_name")
-        sets = ",".join("%s=?" % k for k in vals)
-        if sets:
-            DB.run("UPDATE patients SET %s WHERE id=?" % sets, tuple(vals.values()) + (pid,))
+        if vals:
+            DB.run("patients.update_card", (pid, vals))
     return pid
 
 
 def patient_card(pid):
     if pid is None:
         return {k: "" for k in CARD_FIELDS}
-    p = DB.one("SELECT * FROM patients WHERE id=?", (pid,)) or {}
+    p = DB.one("patients.by_id", (pid,)) or {}
     return {k: p.get(k, "") or "" for k in CARD_FIELDS}
 
 
@@ -581,6 +602,11 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("X-Content-Type-Options", "nosniff")
 
     def reply(self, status, body, ctype, extra=None, json_mode=True):
+        try:  # тело запроса не прочитано: соединение закрывается, иначе остаток тела склеится со следующим запросом
+            if not getattr(self, "_body_read", True) and int(self.headers.get("Content-Length") or 0) > 0:
+                self.close_connection = True
+        except ValueError:
+            self.close_connection = True
         self.send_response(status)
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(body)))
@@ -650,8 +676,7 @@ class Handler(BaseHTTPRequestHandler):
     def doctor(self, required=True):
         sid = self.cookie("mars_sid")
         if sid:
-            row = DB.one("SELECT d.* FROM sessions s JOIN doctors d ON d.id=s.doctor_id "
-                         "WHERE s.sid=? AND s.expires>?", (sid_hash(sid), now()))
+            row = DB.one("sessions.doctor", (sid_hash(sid), now()))
             if row:
                 return row
         if not AUTH_REQUIRED and not (self.headers.get("Authorization") or "").startswith("Bearer pat_"):
@@ -699,6 +724,14 @@ class Handler(BaseHTTPRequestHandler):
             self._dispatch(method, path, qs)
         except ApiError as e:
             self.send_err(e.status, e.code, e.message)
+        except DatabaseUnavailable:
+            try:
+                if not self._body_read and int(self.headers.get("Content-Length") or 0) > 0:
+                    self.close_connection = True
+            except ValueError:
+                self.close_connection = True
+            self.send_json(503, {"error": "service_unavailable", "service": "database", "degraded": True,
+                                 "message": "База данных временно недоступна"}, {"Retry-After": "5"})
         except (BrokenPipeError, ConnectionError, socket.timeout, ssl.SSLError):
             self.close_connection = True
         except Exception:
@@ -757,6 +790,24 @@ class Handler(BaseHTTPRequestHandler):
             }
             if key in table:
                 return table[key](code)
+        m = re.fullmatch(r"/rooms/([A-Za-z0-9]{4,12})/analyze", path)
+        if method == "POST" and m:
+            return self.h_analyze(m.group(1))
+        m = re.fullmatch(r"/rooms/([A-Za-z0-9]{4,12})/audio", path)
+        if method == "POST" and m:
+            return self.h_audio(m.group(1))
+        m = re.fullmatch(r"/rooms/([A-Za-z0-9]{4,12})/transcript(?:/(status|original|deidentify|edit))?", path)
+        if m:
+            sub = (method, m.group(2) or "")
+            if sub in (("GET", ""), ("GET", "status"), ("GET", "original")):
+                return self.h_transcript(m.group(1), m.group(2) or "")
+            if sub == ("POST", "deidentify"):
+                return self.h_transcript_redo(m.group(1))
+            if sub == ("POST", "edit"):
+                return self.h_transcript_edit(m.group(1))
+        m = re.fullmatch(r"/rooms/([A-Za-z0-9]{4,12})/jobs/(\d+)", path)
+        if method == "GET" and m:
+            return self.h_job_get(m.group(1), int(m.group(2)))
         m = re.fullmatch(r"/rooms/([A-Za-z0-9]{4,12})/files/(\d+)", path)
         if method == "GET" and m:
             return self.h_file_get(m.group(1), int(m.group(2)))
@@ -779,13 +830,13 @@ class Handler(BaseHTTPRequestHandler):
         ip_limit(self.client_address[0], "login", 8, 8 / 300.0)
         b = self.read_json(65536)
         login, pw = clean_text(b.get("login"), 100), str(b.get("password") or "")[:200]
-        row = DB.one("SELECT * FROM doctors WHERE login=?", (login,))
+        row = DB.one("doctors.by_login", (login,))
         salt = row["salt"] if row else b"\x00" * 16
         calc = hash_pw(pw, salt)
         if not row or not hmac.compare_digest(calc, row["pw"]):
             raise ApiError(401, "bad_credentials", "Неверный логин или пароль")
         sid = secrets.token_urlsafe(32)
-        DB.run("INSERT INTO sessions(sid,doctor_id,expires) VALUES(?,?,?)", (sid_hash(sid), row["id"], now() + SESSION_TTL))
+        DB.run("sessions.add", (sid_hash(sid), row["id"], now() + SESSION_TTL))
         audit("doctor:%s" % row["login"], "login")
         cookie = "mars_sid=%s; Path=/; HttpOnly; SameSite=Strict; Max-Age=%d" % (sid, SESSION_TTL)
         if SECURE:
@@ -798,7 +849,7 @@ class Handler(BaseHTTPRequestHandler):
         sid = self.cookie("mars_sid")
         doc = self.doctor(required=False)
         if sid:
-            DB.run("DELETE FROM sessions WHERE sid=?", (sid_hash(sid),))
+            DB.run("sessions.delete", (sid_hash(sid),))
         if doc:
             audit(self.actor(doc), "logout")
         cookie = "mars_sid=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0" + ("; Secure" if SECURE else "")
@@ -819,7 +870,7 @@ class Handler(BaseHTTPRequestHandler):
         login, name, pw = clean_text(b.get("login"), 60), clean_text(b.get("name"), 100), str(b.get("password") or "")
         if not login or not name or len(pw) < 8:
             raise ApiError(400, "bad_request", "Нужны логин, имя и пароль не короче 8 символов")
-        if DB.one("SELECT id FROM doctors WHERE login=?", (login,)):
+        if DB.one("doctors.id_by_login", (login,)):
             raise ApiError(409, "exists", "Логин занят")
         did = create_doctor(login, name, pw, 1 if b.get("admin") else 0)
         audit(self.actor(doc), "doctor_created", "", "id=%d" % did)
@@ -833,21 +884,22 @@ class Handler(BaseHTTPRequestHandler):
             lim = max(1, min(1000, int((qs.get("limit") or ["200"])[0])))
         except ValueError:
             lim = 200
-        self.send_json(200, {"items": DB.q("SELECT ts,actor,action,room,detail FROM audit ORDER BY id DESC LIMIT ?", (lim,))})
+        self.send_json(200, {"items": DB.q("audit.recent", (lim,))})
 
     # --- приёмы ---
     def create_appt(self, doc, patient_id, name, email, when, birth=""):
         if patient_id:
-            if not DB.one("SELECT id FROM patients WHERE id=?", (patient_id,)):
+            if not DB.one("patients.exists", (patient_id,)):
                 raise ApiError(404, "patient_not_found", "Пациент не найден")
+            self.need_patient(doc, patient_id)  # иначе записью на приём можно получить доступ к чужой истории
             if email:
-                DB.run("UPDATE patients SET email=? WHERE id=?", (email, patient_id))
+                DB.run("patients.set_email", (email, patient_id))
         elif name:
-            patient_id = DB.run("INSERT INTO patients(full_name,birth,email,created) VALUES(?,?,?,?)",
+            patient_id = DB.run("patients.add_full",
                                 (name, birth, email, now()))
         code = new_code()
         did = doc["id"] if doc["id"] else None
-        aid = DB.run("INSERT INTO appointments(code,patient_id,doctor_id,scheduled,status,created) VALUES(?,?,?,?, 'planned',?)",
+        aid = DB.run("appointments.add",
                      (code, patient_id, did, when, now()))
         return aid, code, patient_id
 
@@ -876,8 +928,7 @@ class Handler(BaseHTTPRequestHandler):
         when = parse_when(b.get("scheduled"))
         aid, code, pid = self.create_appt(doc, pid, name, email, when, clean_text(b.get("birth"), 20))
         audit(self.actor(doc), "appointment_created", code)
-        row = DB.one("SELECT a.*, p.full_name AS patient_name, p.email AS patient_email, d.name AS doctor_name FROM appointments a "
-                     "LEFT JOIN patients p ON p.id=a.patient_id LEFT JOIN doctors d ON d.id=a.doctor_id WHERE a.id=?", (aid,))
+        row = DB.one("appointments.full_by_id", (aid,))
         out = self.appt_dict(row)
         sent = False
         if out["email"]:
@@ -896,29 +947,30 @@ class Handler(BaseHTTPRequestHandler):
             t_to = int((qs.get("to") or [now() + 14 * 86400])[0])
         except ValueError:
             raise ApiError(400, "bad_request", "Некорректный период")
-        sql = ("SELECT a.*, p.full_name AS patient_name, p.email AS patient_email, d.name AS doctor_name FROM appointments a "
-               "LEFT JOIN patients p ON p.id=a.patient_id LEFT JOIN doctors d ON d.id=a.doctor_id "
-               "WHERE a.scheduled BETWEEN ? AND ?")
-        args = [t_from, t_to]
-        if not doc["is_admin"]:
-            sql += " AND (a.doctor_id=? OR a.doctor_id IS NULL)"
-            args.append(doc["id"])
-        sql += " ORDER BY a.scheduled LIMIT 500"
-        self.send_json(200, {"appointments": [self.appt_dict(r) for r in DB.q(sql, tuple(args))]})
+        rows = DB.q("appointments.between", (t_from, t_to, None if doc["is_admin"] else doc["id"]))
+        self.send_json(200, {"appointments": [self.appt_dict(r) for r in rows]})
 
     def h_patients(self, qs):
-        self.doctor()
-        q = clean_text((qs.get("q") or [""])[0], 100)
-        rows = DB.q("SELECT id, full_name, birth FROM patients WHERE full_name LIKE ? ORDER BY full_name LIMIT 100",
-                    ("%" + q.replace("%", "") + "%",))
+        doc = self.doctor()
+        q = "%" + clean_text((qs.get("q") or [""])[0], 100).replace("%", "") + "%"
+        rows = DB.q("patients.search", (q,)) if doc["is_admin"] else DB.q("patients.search_for_doctor", (doc["id"], q))
         self.send_json(200, {"patients": rows})
+
+    def need_patient(self, doc, pid):
+        """Врач видит пациента только через свой приём; администратор видит всех.
+        Чужой пациент неотличим от несуществующего (404), попытка пишется в журнал аудита."""
+        if doc["is_admin"] or DB.one("patients.seen_by_doctor", (pid, doc["id"])):
+            return
+        audit(self.actor(doc), "patient_access_denied", "", "patient=%s" % pid)
+        raise ApiError(404, "patient_not_found", "Пациент не найден")
 
     def h_patient_sub(self, pid, sub):
         doc = self.doctor()
+        self.need_patient(doc, pid)
         if sub == "photos":
-            rows = DB.q("SELECT id, appt_id, pose, ts, size FROM photos WHERE patient_id=? ORDER BY ts DESC LIMIT 500", (pid,))
+            rows = DB.q("photos.of_patient", (pid,))
             return self.send_json(200, {"photos": rows})
-        rows = DB.q("SELECT id, appt_id, kind, ts, body FROM measurements WHERE patient_id=? ORDER BY ts LIMIT 2000", (pid,))
+        rows = DB.q("measurements.of_patient", (pid,))
         for r in rows:
             try:
                 r["data"] = json.loads(r.pop("body"))
@@ -928,9 +980,14 @@ class Handler(BaseHTTPRequestHandler):
 
     def h_photo(self, pid):
         doc = self.doctor()
-        row = DB.one("SELECT * FROM photos WHERE id=?", (pid,))
+        row = DB.one("photos.by_id", (pid,))
         if not row:
             raise ApiError(404, "not_found", "Снимок не найден")
+        if row["patient_id"] is not None:
+            try:
+                self.need_patient(doc, row["patient_id"])
+            except ApiError:
+                raise ApiError(404, "not_found", "Снимок не найден")
         p = DATA_DIR / row["path"]
         if not p.is_file():
             raise ApiError(404, "not_found", "Файл снимка отсутствует")
@@ -944,7 +1001,7 @@ class Handler(BaseHTTPRequestHandler):
         b = self.read_json(65536, allow_empty=True)
         aid = b.get("appointment_id")
         if aid:
-            appt = DB.one("SELECT * FROM appointments WHERE id=?", (int(aid),)) if str(aid).isdigit() else None
+            appt = DB.one("appointments.by_id", (int(aid),)) if str(aid).isdigit() else None
             if not appt:
                 raise ApiError(404, "appointment_not_found", "Приём не найден")
             if appt["status"] == "completed":
@@ -953,7 +1010,7 @@ class Handler(BaseHTTPRequestHandler):
                 raise ApiError(403, "forbidden", "Приём назначен другому врачу")
         else:
             aid, code, _ = self.create_appt(doc, None, "", "", now())
-            appt = DB.one("SELECT * FROM appointments WHERE id=?", (aid,))
+            appt = DB.one("appointments.by_id", (aid,))
             audit(self.actor(doc), "appointment_created", code)
         room = get_room(appt["code"], create=True)
         with COND:
@@ -964,13 +1021,13 @@ class Handler(BaseHTTPRequestHandler):
             token = room.doc_token
             room.last = time.time()
         if not appt["doctor_id"] and doc["id"]:
-            DB.run("UPDATE appointments SET doctor_id=? WHERE id=?", (doc["id"], appt["id"]))
+            DB.run("appointments.set_doctor", (doc["id"], appt["id"]))
         self.send_json(201, {"room": room.code, "token": token, "appointment_id": appt["id"]})
 
     def h_info(self, code):
         ip_limit(self.client_address[0], "info", 30, 0.5)
         code = code.upper()
-        appt = DB.one("SELECT a.*, d.name AS doctor_name FROM appointments a LEFT JOIN doctors d ON d.id=a.doctor_id WHERE a.code=?", (code,))
+        appt = DB.one("appointments.with_doctor_by_code", (code,))
         if not appt:
             raise ApiError(404, "room_not_found", "Комната не найдена")
         with COND:
@@ -1080,7 +1137,8 @@ class Handler(BaseHTTPRequestHandler):
                 raw_cost = 5
             if not room.bucket(role, "main").take(raw_cost):
                 raise ApiError(429, "rate_limited", "Слишком много событий")
-        appt = appt_by_room(room)
+        # сигнализация звонка и события лица в базу не ходят: идущий звонок переживает отказ database
+        appt = None if typ in ("offer", "answer", "ice", "presence", "face", "measure") else appt_by_room(room)
         who = "doctor" if role == "doctor" else "patient"
         if typ in ("offer", "answer", "ice"):
             if not isinstance(data, dict):
@@ -1090,7 +1148,7 @@ class Handler(BaseHTTPRequestHandler):
             text = clean_text((data or {}).get("text") if isinstance(data, dict) else "", 4000)
             if not text:
                 raise ApiError(400, "empty", "Пустое сообщение")
-            mid = DB.run("INSERT INTO messages(appt_id,ts,sender,kind,body) VALUES(?,?,?,?,?)",
+            mid = DB.run("messages.add",
                          (appt["id"], now(), who, "chat", json.dumps({"text": text}, ensure_ascii=False)))
             to, out = "all", {"text": text, "mid": mid}
         elif typ == "file":
@@ -1112,8 +1170,13 @@ class Handler(BaseHTTPRequestHandler):
         elif typ in ("presence", "face", "measure"):
             if not isinstance(data, dict):
                 raise ApiError(400, "bad_request", "Некорректные данные")
-            if typ == "presence" and role == "patient" and data.get("state") == "waiting" and appt["status"] in ("planned", "waiting"):
-                DB.run("UPDATE appointments SET status='waiting' WHERE id=?", (appt["id"],))
+            if typ == "presence" and role == "patient" and data.get("state") == "waiting":
+                try:
+                    appt = appt_by_room(room)
+                    if appt["status"] in ("planned", "waiting"):
+                        DB.run("appointments.set_waiting", (appt["id"],))
+                except DatabaseUnavailable:
+                    pass  # отметка «пациент ждёт» не важнее сигнализации
             to, out = other, data
         elif typ == "kill":
             if role != "doctor":
@@ -1135,7 +1198,7 @@ class Handler(BaseHTTPRequestHandler):
             room.closed = True
             room.delivered_kill.add("doctor")
             COND.notify_all()
-        DB.run("UPDATE appointments SET status='completed', ended=? WHERE id=?", (now(), appt["id"]))
+        DB.run("appointments.set_completed", (now(), appt["id"]))
         audit("doctor", "emergency_end", room.code)
         self.send_json(202, {"status": "accepted", "id": ev["id"]})
 
@@ -1152,16 +1215,21 @@ class Handler(BaseHTTPRequestHandler):
             loc = load_protocol_json(appt).get("location") or {}
             if not clean_text(loc.get("address")) or not clean_text(loc.get("phone")):
                 raise ApiError(400, "location_required", "Укажите адрес и телефон пациента перед началом приёма")
-            DB.run("UPDATE appointments SET status='in_progress', started=? WHERE id=?", (now(), appt["id"]))
+            DB.run("appointments.set_started", (now(), appt["id"]))
             audit("doctor", "consultation_start", room.code)
             return other, data
         if act == "end":
             if role != "doctor":
                 raise ApiError(403, "forbidden", "Только врач")
-            DB.run("UPDATE appointments SET status='completed', ended=? WHERE id=?", (now(), appt["id"]))
+            DB.run("appointments.set_completed", (now(), appt["id"]))
+            set_speech(appt, active=False)
+            if service_enabled("assistant") and DB.one("jobs.any_transcribe", (appt["id"],)):
+                enqueue_deid(appt["id"])  # расшифровка уходит на обезличивание по «Завершить приём»
             room.ended = True
             audit("doctor", "consultation_end", room.code)
             return "all", data
+        if act in ("speech_request", "speech_stop", "speech_consent"):
+            return self.speech_control(room, role, appt, act, data)
         if act == "face_consent":
             if role != "patient":
                 raise ApiError(403, "forbidden", "Только пациент")
@@ -1176,16 +1244,35 @@ class Handler(BaseHTTPRequestHandler):
             return "doctor", {"action": "reset_patient"}
         return other, data
 
+    def speech_control(self, room, role, appt, act, data):
+        """Запрос врача -> согласие пациента -> запись у обеих сторон. Пациент может отозвать в любой момент."""
+        if act == "speech_request":
+            if role != "doctor":
+                raise ApiError(403, "forbidden", "Только врач")
+            return "patient", {"action": act}
+        if act == "speech_stop":
+            if role != "doctor":
+                raise ApiError(403, "forbidden", "Только врач")
+            sp = set_speech(appt, active=False)
+            audit("doctor", "speech_stopped", room.code)
+            return "all", {"action": act, "speech": sp}
+        if role != "patient":
+            raise ApiError(403, "forbidden", "Только пациент")
+        g = data.get("granted") is True
+        sp = set_speech(appt, consent=g, active=g)
+        audit("patient", "consent_speech", room.code, "granted" if g else "revoked")
+        return "all", {"action": act, "granted": g, "speech": sp}
+
     def build_document(self, room, appt):
-        row = DB.one("SELECT body FROM conclusions WHERE appt_id=?", (appt["id"],))
+        row = DB.one("conclusions.get", (appt["id"],))
         if not row:
             raise ApiError(400, "no_conclusion", "Сначала сохраните заключение")
         concl = json.loads(row["body"])
-        doc = DB.one("SELECT name FROM doctors WHERE id=?", (appt["doctor_id"],)) if appt["doctor_id"] else None
-        pname = (DB.one("SELECT full_name FROM patients WHERE id=?", (appt["patient_id"],)) or {}).get("full_name", "") if appt["patient_id"] else ""
+        doc = DB.one("doctors.name", (appt["doctor_id"],)) if appt["doctor_id"] else None
+        pname = (DB.one("patients.name", (appt["patient_id"],)) or {}).get("full_name", "") if appt["patient_id"] else ""
         payload = {"center": CENTER_NAME, "doctor": (doc or {}).get("name", ""), "patient": pname,
                    "date": datetime.now().strftime("%Y-%m-%d"), "conclusion": concl}
-        mid = DB.run("INSERT INTO messages(appt_id,ts,sender,kind,body) VALUES(?,?,?,?,?)",
+        mid = DB.run("messages.add",
                      (appt["id"], now(), "doctor", "document", json.dumps(payload, ensure_ascii=False)))
         audit("doctor", "conclusion_sent", room.code)
         payload["mid"] = mid
@@ -1208,20 +1295,20 @@ class Handler(BaseHTTPRequestHandler):
             raise ApiError(413, "too_large", "Файл больше 20 МБ")
         if not check_signature(ext, raw):
             raise ApiError(400, "bad_signature", "Содержимое не соответствует типу файла")
-        fid = DB.run("INSERT INTO files(appt_id,ts,sender,name,mime,size) VALUES(?,?,?,?,?,?)",
+        fid = DB.run("files.add",
                      (appt["id"], now(), who, name, FILE_TYPES[ext], len(raw)))
         rel = "files/%d.dat" % fid
         (DATA_DIR / rel).write_bytes(raw)
-        DB.run("UPDATE files SET path=? WHERE id=?", (rel, fid))
+        DB.run("files.set_path", (rel, fid))
         meta = {"id": fid, "name": name, "mime": FILE_TYPES[ext], "size": len(raw)}
-        DB.run("INSERT INTO messages(appt_id,ts,sender,kind,body) VALUES(?,?,?,?,?)",
+        DB.run("messages.add",
                (appt["id"], now(), who, "file", json.dumps(meta, ensure_ascii=False)))
         audit("doctor" if who == "doctor" else "patient", "file_upload", room.code, "id=%d size=%d" % (fid, len(raw)))
         return meta
 
     def h_file_get(self, code, fid):
         room, role = self.need_room(code)
-        row = DB.one("SELECT * FROM files WHERE id=? AND appt_id=?", (fid, room.appt_id))
+        row = DB.one("files.in_appointment", (fid, room.appt_id))
         if not row or not (DATA_DIR / row["path"]).is_file():
             raise ApiError(404, "not_found", "Файл не найден")
         q = urllib.parse.quote(row["name"])
@@ -1242,11 +1329,11 @@ class Handler(BaseHTTPRequestHandler):
             raise ApiError(400, "bad_jpeg", "Ожидался JPEG")
         appt = appt_by_room(room)
         ts = now()
-        pid = DB.run("INSERT INTO photos(appt_id,patient_id,pose,ts,size) VALUES(?,?,?,?,?)",
+        pid = DB.run("photos.add",
                      (appt["id"], appt["patient_id"], pose, ts, len(raw)))
         rel = "photos/%d.jpg" % pid
         (DATA_DIR / rel).write_bytes(raw)
-        DB.run("UPDATE photos SET path=? WHERE id=?", (rel, pid))
+        DB.run("photos.set_path", (rel, pid))
         audit("doctor" if role == "doctor" else "patient", "photo_saved", room.code, "id=%d pose=%s" % (pid, pose))
         with COND:
             if not room.closed:
@@ -1255,8 +1342,8 @@ class Handler(BaseHTTPRequestHandler):
 
     # --- протокол ---
     def meta(self, appt):
-        d = DB.one("SELECT name FROM doctors WHERE id=?", (appt["doctor_id"],)) if appt["doctor_id"] else None
-        p = DB.one("SELECT full_name FROM patients WHERE id=?", (appt["patient_id"],)) if appt["patient_id"] else None
+        d = DB.one("doctors.name", (appt["doctor_id"],)) if appt["doctor_id"] else None
+        p = DB.one("patients.name", (appt["patient_id"],)) if appt["patient_id"] else None
         return {"id": appt["id"], "code": appt["code"], "status": appt["status"], "scheduled": appt["scheduled"],
                 "doctor": (d or {}).get("name", ""), "patient_name": (p or {}).get("full_name", ""),
                 "patient_id": appt["patient_id"], "center": CENTER_NAME}
@@ -1283,17 +1370,223 @@ class Handler(BaseHTTPRequestHandler):
             return self.send_json(502, {"error": "bad_gateway", "service": "reports", "message": "Некорректный ответ сервиса отчётов"})
         self.send_json(200, {"html": data["html"]})
 
+    # --- анализ лица (сервис vision, через очередь заданий) ---
+    def h_analyze(self, code):
+        """Ставит расчёт в очередь и отвечает 202 с номером задания. Повтор с тем же key не создаёт дубля.
+        Без сервиса vision (одиночный режим) сразу 503: браузер считает сам."""
+        room, role = self.need_room(code)
+        if not room.bucket(role, "main").take(1):
+            raise ApiError(429, "rate_limited", "Слишком много запросов")
+        b = self.read_json(4 * 1024 * 1024)
+        kind = clean_text(b.get("kind"), 20)
+        if kind not in VISION_KINDS:
+            raise ApiError(400, "bad_kind", "Неизвестный вид анализа")
+        key = clean_text(b.get("key"), 64)
+        if not re.fullmatch(r"[A-Za-z0-9_-]{8,64}", key or ""):
+            raise ApiError(400, "bad_key", "Нужен ключ задания (8-64 символа)")
+        if not isinstance(b.get("input"), dict):
+            raise ApiError(400, "bad_input", "Нет данных для анализа")
+        if not vision_enabled():
+            return self.send_json(503, {"error": "service_unavailable", "service": "vision", "degraded": True,
+                                        "message": "Сервис анализа не подключён"}, {"Retry-After": "30"})
+        appt = appt_by_room(room)
+        t = now()
+        DB.run("jobs.add_once",
+               (appt["id"], kind, key, t, t, json.dumps(b["input"], ensure_ascii=False)))
+        job = DB.one("jobs.by_key", (appt["id"], key))
+        JOB_EVTS["vision"].set()
+        self.send_json(202, job_view(job))
+
+    # --- расшифровка речи (сервис speech, через очередь заданий) ---
+    def h_audio(self, code):
+        """Кусок записи своего микрофона (около 10 с). Принимается только при согласии пациента
+        и включённой расшифровке. Кусок сохраняется на диск сразу, даже если speech недоступен."""
+        room, role = self.need_room(code)
+        if not room.bucket(role, "main").take(1):
+            raise ApiError(429, "rate_limited", "Слишком много кусков записи")
+        appt = appt_by_room(room)
+        sp = load_protocol_json(appt).get("speech") or {}
+        if not (sp.get("consent") and sp.get("active")):
+            raise ApiError(403, "no_speech_consent", "Нет согласия пациента на расшифровку речи")
+        mime = (self.headers.get("Content-Type") or "").split(";")[0].strip().lower()
+        if mime not in AUDIO_MIME:
+            raise ApiError(415, "bad_audio", "Неподдерживаемый формат аудио")
+        key = clean_text(self.headers.get("X-Chunk-Key"), 64)
+        if not re.fullmatch(r"[A-Za-z0-9_-]{8,64}", key or ""):
+            raise ApiError(400, "bad_key", "Нужен ключ куска (8-64 символа)")
+        try:
+            seq = max(0, int(self.headers.get("X-Seq") or 0))
+            dur = max(0, min(60000, int(self.headers.get("X-Duration-Ms") or 0)))
+        except ValueError:
+            raise ApiError(400, "bad_request", "Некорректный номер или длительность куска")
+        raw = self.read_raw(MAX_AUDIO)
+        if len(raw) < 100:
+            raise ApiError(400, "bad_audio", "Пустой кусок записи")
+        key = role[0] + "-" + key  # ключи врача и пациента не пересекаются
+        dup = DB.one("jobs.by_key", (appt["id"], key))
+        if dup:
+            return self.send_json(202, job_view(dup))
+        # Время начала куска по часам сервера (часы двух устройств могут расходиться). Сеанс записи
+        # привязывается к часам сервера по первому куску, дальше идёт смещение от браузера:
+        # так куски, пришедшие пачкой после обрыва связи, встают на свои места.
+        try:
+            off = int(self.headers.get("X-Offset-Ms")) if self.headers.get("X-Offset-Ms") else None
+        except ValueError:
+            off = None
+        now_ms = int(time.time() * 1000)
+        anchor = None
+        if off is not None and off >= 0:
+            sess = key.rsplit("-", 1)[0]
+            first = DB.one("jobs.first_input_like",
+                           (appt["id"], sess + "-%"))
+            anchor = (json.loads(first["input"]).get("anchor") if first else None) or now_ms - dur - off
+            t_ms = anchor + off
+        else:
+            t_ms = now_ms - dur
+        rel = "audio/%d_%s_%s%s" % (appt["id"], role, secrets.token_hex(6), AUDIO_MIME[mime])
+        (DATA_DIR / rel).write_bytes(raw)
+        inp = {"audio": rel, "mime": mime, "role": role, "seq": seq, "t": t_ms, "dur": dur, "anchor": anchor}
+        t = now()
+        DB.run("jobs.add_once",
+               (appt["id"], "transcribe", key, t, t, json.dumps(inp, ensure_ascii=False)))
+        job = DB.one("jobs.by_key", (appt["id"], key))
+        if json.loads(job["input"]).get("audio") != rel:
+            drop_audio(inp)  # одновременный повтор: этот файл не нужен
+        JOB_EVTS["speech"].set()
+        self.send_json(202, job_view(job))
+
+    def h_transcript(self, code, what):
+        """Только врач. status: сколько кусков расшифровано (без текста).
+        Без суффикса: обезличенная расшифровка (метки вместо личных данных, без оригиналов).
+        original: исходная расшифровка; каждый просмотр пишется в журнал аудита."""
+        room, role = self.need_room(code)
+        if role != "doctor":
+            raise ApiError(403, "forbidden", "Только врач")
+        appt = appt_by_room(room)
+        rows = DB.q("jobs.transcribe_counts", (appt["id"],))
+        cnt = {r["status"]: r["n"] for r in rows}
+        st = {"chunks": sum(cnt.values()), "done": cnt.get("done", 0), "queued": cnt.get("queued", 0), "error": cnt.get("error", 0),
+              "speech": (load_protocol_json(appt).get("speech") or {}), "service_up": None}
+        if service_enabled("speech"):
+            st["service_up"] = (services_status()["services"].get("speech") or {}).get("up")
+        if what == "status":
+            return self.send_json(200, st)
+        if what == "original":
+            segs = DB.q("speech.segments", (appt["id"],))
+            audit("doctor", "transcript_original_viewed", room.code, "segments=%d" % len(segs))
+            return self.send_json(200, {"status": st, "segments": merge_speakers(segs)})
+        self.send_json(200, {"status": st, "deid": transcript_view(appt["id"])})
+
+    def h_transcript_redo(self, code):
+        room, role = self.need_room(code)
+        self.read_json(1024, allow_empty=True)  # тело надо прочитать: иначе оно склеится со следующим запросом в том же соединении
+        if role != "doctor":
+            raise ApiError(403, "forbidden", "Только врач")
+        appt = appt_by_room(room)
+        if not DB.one("speech.any_segment", (appt["id"],)) and \
+                not DB.one("jobs.transcribe_pending", (appt["id"],)):
+            raise ApiError(400, "no_transcript", "Расшифровки этого приёма нет")
+        if not service_enabled("assistant"):
+            return self.send_json(503, {"error": "service_unavailable", "service": "assistant", "degraded": True,
+                                        "message": "Сервис обезличивания не подключён"}, {"Retry-After": "30"})
+        enqueue_deid(appt["id"])
+        audit("doctor", "transcript_deidentify_requested", room.code)
+        self.send_json(202, {"deid": transcript_view(appt["id"])})
+
+    def h_transcript_edit(self, code):
+        """Правки врача: undo (вернуть оригинал под меткой), add (скрыть фрагмент), confirm / unconfirm (для отчёта).
+        Любая правка текста снимает подтверждение."""
+        room, role = self.need_room(code)
+        if role != "doctor":
+            raise ApiError(403, "forbidden", "Только врач")
+        appt = appt_by_room(room)
+        b = self.read_json(65536)
+        op = clean_text(b.get("op"), 20)
+        with PROTO_LOCK:
+            row = DB.one("transcripts.get", (appt["id"],))
+            if not row or row["status"] != "done" or not row["deid"]:
+                raise ApiError(409, "not_ready", "Обезличенной расшифровки ещё нет")
+            if op in ("confirm", "unconfirm"):
+                DB.run("transcripts.set_confirmed", (1 if op == "confirm" else 0, now(), appt["id"]))
+                audit("doctor", "transcript_" + op + "ed", room.code)
+                return self.send_json(200, {"deid": transcript_view(appt["id"])})
+            if not row["mapping"]:
+                raise ApiError(410, "original_expired", "Срок хранения исходника истёк: правки недоступны")
+            mp = json.loads(row["mapping"])
+            if op == "undo":
+                lab = clean_text(b.get("label"), 60)
+                n = 0
+                for g in mp["segments"]:
+                    np_ = []
+                    for x in g["parts"]:
+                        if isinstance(x, dict) and x["l"] == lab:
+                            np_.append(x["o"])
+                            n += 1
+                        else:
+                            np_.append(x)
+                    g["parts"] = np_
+                mp["replacements"] = [r for r in mp["replacements"] if r.get("label") != lab]
+                if not n:
+                    raise ApiError(404, "no_label", "Такой замены нет")
+                detail = "%s x%d" % (lab, n)
+            elif op == "add":
+                frag = clean_text(b.get("text"), 200).strip()
+                typ = clean_text(b.get("type"), 20) or "OTHER"
+                if len(frag) < 2:
+                    raise ApiError(400, "bad_text", "Выделите фрагмент текста")
+                kinds = {"NAME": "ИМЯ", "ORG": "ОРГАНИЗАЦИЯ", "CITY": "МЕСТО", "SCHOOL": "УЧЕБНОЕ_ЗАВЕДЕНИЕ", "OTHER": "СКРЫТО"}
+                base = kinds.get(typ, "СКРЫТО")
+                used = {r.get("label") for r in mp["replacements"]}
+                k = 1
+                while "[%s_%d]" % (base, k) in used:
+                    k += 1
+                lab = "[%s_%d]" % (base, k)
+                rx = re.compile(re.escape(frag), re.I)
+                n = 0
+                for g in mp["segments"]:
+                    np_ = []
+                    for x in g["parts"]:
+                        if not isinstance(x, str):
+                            np_.append(x)
+                            continue
+                        pos = 0
+                        for m in rx.finditer(x):
+                            np_ += [x[pos:m.start()], {"l": lab, "o": m.group()}]
+                            pos = m.end()
+                            n += 1
+                        np_.append(x[pos:])
+                    g["parts"] = [y for y in np_ if y != ""]
+                if not n:
+                    raise ApiError(404, "not_found", "Фрагмент не найден в обезличенном тексте")
+                mp["replacements"].append({"label": lab, "type": typ, "source": "doctor", "originals": [frag]})
+                detail = "%s x%d" % (lab, n)
+            else:
+                raise ApiError(400, "bad_op", "Неизвестная правка")
+            deid = [{"role": g["role"], "t": g["t"], "text": parts_text(g["parts"])} for g in mp["segments"]]
+            DB.run("transcripts.edit",
+                   (json.dumps(deid, ensure_ascii=False), json.dumps(mp, ensure_ascii=False), now(), appt["id"]))
+        audit("doctor", "transcript_replacement_" + ("undone" if op == "undo" else "added"), room.code, detail)
+        self.send_json(200, {"deid": transcript_view(appt["id"])})
+
+    def h_job_get(self, code, jid):
+        room, role = self.need_room(code)
+        job = DB.one("jobs.in_appointment", (jid, appt_by_room(room)["id"]))
+        if not job:
+            raise ApiError(404, "not_found", "Задание не найдено")
+        self.send_json(200, job_view(job))
+
     def h_protocol_get(self, code):
         room, role = self.need_room(code)
         appt = appt_by_room(room)
         proto = load_protocol_json(appt)
         face = proto.get("face") or {}
         if role == "patient":
-            return self.send_json(200, {"appointment": self.meta(appt), "status": appt["status"], "face": face})
-        note = DB.one("SELECT body FROM notes WHERE appt_id=?", (appt["id"],))
-        concl = DB.one("SELECT body FROM conclusions WHERE appt_id=?", (appt["id"],))
+            return self.send_json(200, {"appointment": self.meta(appt), "status": appt["status"], "face": face,
+                                        "speech": proto.get("speech") or {}})
+        note = DB.one("notes.get", (appt["id"],))
+        concl = DB.one("conclusions.get", (appt["id"],))
         self.send_json(200, {"appointment": self.meta(appt), "status": appt["status"], "location": proto.get("location") or {},
-                             "face": face, "card": patient_card(appt["patient_id"]),
+                             "face": face, "speech": proto.get("speech") or {}, "card": patient_card(appt["patient_id"]),
                              "notes": (note or {}).get("body", ""),
                              "conclusion": json.loads(concl["body"]) if concl else None})
 
@@ -1319,12 +1612,16 @@ class Handler(BaseHTTPRequestHandler):
             concl = clean_conclusion(b["conclusion"])
         if "card" in b and isinstance(b["card"], dict):
             save_card(appt, b["card"])
-        DB.run("UPDATE appointments SET protocol=? WHERE id=?", (json.dumps(proto, ensure_ascii=False), appt["id"]))
+        with PROTO_LOCK:  # состояние расшифровки меняет пациент: берём свежее, не затираем
+            fresh = load_protocol_json(appt_by_room(room))
+            if "speech" in fresh:
+                proto["speech"] = fresh["speech"]
+            DB.run("appointments.set_protocol", (json.dumps(proto, ensure_ascii=False), appt["id"]))
         if "notes" in b:
-            DB.run("INSERT INTO notes(appt_id,body,updated) VALUES(?,?,?) ON CONFLICT(appt_id) DO UPDATE SET body=excluded.body, updated=excluded.updated",
+            DB.run("notes.save",
                    (appt["id"], clean_text(b["notes"], 20000), now()))
         if concl is not None:
-            DB.run("INSERT INTO conclusions(appt_id,body,updated) VALUES(?,?,?) ON CONFLICT(appt_id) DO UPDATE SET body=excluded.body, updated=excluded.updated",
+            DB.run("conclusions.save",
                    (appt["id"], json.dumps(concl, ensure_ascii=False), now()))
             audit("doctor", "conclusion_saved", room.code)
         self.send_json(200, {"status": "saved"})
@@ -1341,7 +1638,7 @@ class Handler(BaseHTTPRequestHandler):
         if has_mm_keys(b) and not (isinstance(cal, dict) and cal.get("source")):
             raise ApiError(400, "calibration_required", "Значения в мм без калибровки не сохраняются")
         appt = appt_by_room(room)
-        DB.run("INSERT INTO measurements(appt_id,patient_id,kind,ts,body) VALUES(?,?,?,?,?)",
+        DB.run("measurements.add",
                (appt["id"], appt["patient_id"], kind, now(), json.dumps(b, ensure_ascii=False)))
         audit("doctor" if role == "doctor" else "patient", "measurements_saved", room.code, kind)
         self.send_json(200, {"status": "stored", "kind": kind})
@@ -1387,6 +1684,222 @@ def services_status():
     return res
 
 
+# Очередь заданий для вторичных сервисов: задания переживают перезапуск, повторы с нарастающей паузой.
+# У каждого сервиса свой поток: зависший speech не задерживает расчёты vision.
+VISION_KINDS = ("symmetry", "mobility", "compare", "calibrate")
+JOB_SERVICES = {
+    "vision": {"kinds": VISION_KINDS, "timeout": 10.0, "max_attempts": 20},
+    # куски речи ждут, пока speech не вернётся (в пределах JOB_KEEP); кусок 10 с на процессоре идёт несколько секунд
+    "speech": {"kinds": ("transcribe",), "timeout": 120.0, "max_attempts": None},
+    # обезличивание всей расшифровки: окна текста по очереди через Ollama, на процессоре это минуты
+    "assistant": {"kinds": ("deidentify",), "timeout": 1800.0, "max_attempts": None},
+}
+JOB_EVTS = {n: threading.Event() for n in JOB_SERVICES}
+JOB_KEEP = 86400  # входные данные (точки лица, куски аудио) хранятся не дольше суток
+TRANSCRIPT_DAYS = int(os.environ.get("TRANSCRIPT_DAYS", "30"))  # срок хранения исходной расшифровки
+AUDIO_MIME = {"audio/webm": ".webm", "audio/ogg": ".ogg", "audio/mp4": ".m4a", "audio/mpeg": ".mp3", "audio/wav": ".wav"}
+MAX_AUDIO = 2 * 1024 * 1024
+
+
+def service_enabled(name):
+    return _ServiceClient is not None and _svc_config is not None and name in _svc_config.monitored_services()
+
+
+def vision_enabled():
+    return service_enabled("vision")
+
+
+def job_service(kind):
+    return next(n for n, c in JOB_SERVICES.items() if kind in c["kinds"])
+
+
+def job_view(job):
+    out = {"id": job["id"], "kind": job["kind"], "status": job["status"], "attempts": job["attempts"],
+           "created": job["created"], "updated": job["updated"]}
+    if job["status"] == "done" and job["result"] and job["kind"] not in ("transcribe", "deidentify"):
+        out["result"] = json.loads(job["result"])
+    if job["error"]:
+        out["error"] = json.loads(job["error"])
+    if job["status"] == "queued" and job["attempts"]:
+        out["retry_at"] = job["next_try"]
+    return out
+
+
+def drop_audio(inp):
+    rel = (inp or {}).get("audio")
+    if rel:
+        try:
+            (DATA_DIR / rel).unlink()
+        except OSError:
+            pass
+
+
+def job_payload(job, inp):
+    """Тело запроса к сервису. Кусок речи читается с диска только при отправке,
+    расшифровка для обезличивания собирается в момент отправки (все куски уже расшифрованы)."""
+    if job["kind"] == "deidentify":
+        return deid_payload(job["appt_id"])
+    if job["kind"] != "transcribe":
+        return inp
+    path = DATA_DIR / inp["audio"]
+    if not path.is_file():
+        return None
+    return {"audio_b64": base64.b64encode(path.read_bytes()).decode("ascii"), "mime": inp.get("mime", "")}
+
+
+def job_done(job, inp, data):
+    """Итог задания. Расшифровка ложится в speech_segments, аудио удаляется сразу;
+    обезличенный текст и соответствие замен ложатся в transcripts раздельно."""
+    if job["kind"] == "deidentify":
+        return deid_done(job["appt_id"], data)
+    if job["kind"] != "transcribe":
+        return json.dumps(data, ensure_ascii=False)
+    t = now()
+    for sg in data.get("segments") or []:
+        text = clean_text(sg.get("text"), 4000)
+        if text:
+            DB.run("speech.add_segment",
+                   (job["appt_id"], inp["role"], inp["t"], inp.get("seq", 0), float(sg.get("start") or 0), float(sg.get("end") or 0), text, t))
+    drop_audio(inp)
+    return json.dumps({"segments": len(data.get("segments") or []), "duration": data.get("duration"),
+                       "elapsed": data.get("elapsed"), "model": data.get("model")}, ensure_ascii=False)
+
+
+def deid_payload(appt_id):
+    appt = DB.one("appointments.by_id", (appt_id,))
+    segs = DB.q("speech.segments", (appt_id,))
+    card = patient_card(appt["patient_id"]) if appt and appt["patient_id"] else {}
+    loc = load_protocol_json(appt or {}).get("location") or {}
+    doc = DB.one("doctors.name", (appt["doctor_id"],)) if appt and appt["doctor_id"] else None
+    known = {"patient": {"full_name": card.get("full_name", ""), "birth": card.get("birth", ""), "email": card.get("email", ""),
+                         "phone": loc.get("phone", ""), "address": loc.get("address", "")},
+             "doctor": {"name": (doc or {}).get("name", "")}}
+    return {"segments": merge_speakers(segs), "known": known}
+
+
+def parts_text(parts):
+    return "".join(p if isinstance(p, str) else p["l"] for p in parts)
+
+
+def deid_done(appt_id, data):
+    segs = data.get("segments") or []
+    mapping = {"segments": [{"role": g.get("role"), "t": g.get("t"), "parts": g.get("parts") or [g.get("text", "")]} for g in segs],
+               "replacements": data.get("replacements") or []}
+    deid = [{"role": g["role"], "t": g["t"], "text": parts_text(g["parts"])} for g in mapping["segments"]]
+    st = data.get("stats") or {}
+    DB.run("transcripts.done",
+           (json.dumps(deid, ensure_ascii=False), json.dumps(mapping, ensure_ascii=False), clean_text(st.get("model"), 60),
+            json.dumps(st, ensure_ascii=False), now(), appt_id))
+    return json.dumps(st, ensure_ascii=False)
+
+
+def transcript_view(appt_id):
+    """Обезличенная расшифровка для врача: текст с метками и список замен без оригиналов."""
+    row = DB.one("transcripts.get", (appt_id,))
+    if not row:
+        return {"status": "none"}
+    out = {"status": row["status"], "confirmed": bool(row["confirmed"]), "model": row["model"], "updated": row["updated"],
+           "segments": json.loads(row["deid"]) if row["deid"] else [], "editable": bool(row["mapping"])}
+    if row["mapping"]:
+        out["replacements"] = [{"label": r.get("label"), "type": r.get("type"), "source": r.get("source"), "forms": len(r.get("originals") or [])}
+                               for r in json.loads(row["mapping"]).get("replacements") or []]
+    if row["error"]:
+        out["error"] = json.loads(row["error"])
+    if row["status"] == "queued":
+        job = DB.one("jobs.latest_deidentify", (appt_id,))
+        if job and job["error"]:
+            out["waiting"] = json.loads(job["error"]).get("service")  # ждёт, пока сервис оживёт
+    return out
+
+
+def enqueue_deid(appt_id):
+    """Обезличивание после «Завершить приём» или по кнопке «Обезличить повторно».
+    Прежний обезличенный текст виден, пока не готов новый; подтверждение снимается."""
+    t = now()
+    DB.run("transcripts.queue", (appt_id, "queued", t, t))
+    DB.run("jobs.add",
+           (appt_id, "deidentify", "deid-%d-%s" % (t, secrets.token_hex(4)), t, t, "{}"))
+    JOB_EVTS["assistant"].set()
+
+
+def merge_speakers(segs):
+    """Реплики обеих сторон по времени. У одного говорящего порядок всегда кусок за куском:
+    Whisper иногда ставит последнему сегменту время за краем куска, и он не должен перепрыгнуть следующий кусок."""
+    lanes = {}
+    for g in segs:  # уже по chunk_t, id: внутри куска сегменты в порядке расшифровки
+        lane = lanes.setdefault(g["role"], [])
+        t = g["chunk_t"] + int(g["start"] * 1000)
+        if lane:
+            t = max(t, lane[-1]["t"])
+        lane.append({"role": g["role"], "t": t, "dur": int((g["end"] - g["start"]) * 1000), "text": g["text"]})
+    return list(heapq.merge(*lanes.values(), key=lambda x: x["t"]))
+
+
+def run_job(job, svc):
+    cfg = JOB_SERVICES[svc]
+    cli = _SVC_CLIENTS.get(svc) or _SVC_CLIENTS.setdefault(svc, _ServiceClient(svc, probe_every=5.0))
+    t = now()
+    inp = json.loads(job["input"])
+    if job["kind"] == "deidentify" and DB.one("jobs.transcribe_pending", (job["appt_id"],)):
+        DB.run("jobs.postpone", (t + 5, job["id"]))  # ждём, пока расшифруются все куски
+        return True
+    payload = job_payload(job, inp)
+    if payload is None:
+        err = json.dumps({"error": "input_gone", "service": svc, "message": "Входные данные задания не найдены"}, ensure_ascii=False)
+        DB.run("jobs.fail", (t, err, job["id"]))
+        return True
+    path = "/v1/" + job["kind"]
+    try:
+        st, data = cli.call("POST", path, payload, timeout=cfg["timeout"], request_id="job%d" % job["id"])
+    except Exception as e:  # noqa: BLE001  (ServiceUnavailable и сбои сети: повторим позже)
+        n = job["attempts"] + 1
+        err = json.dumps({"error": "service_unavailable", "service": svc, "message": "Сервис временно недоступен"}, ensure_ascii=False)
+        if cfg["max_attempts"] and n >= cfg["max_attempts"]:
+            DB.run("jobs.give_up", (n, t, err, job["id"]))
+        else:
+            DB.run("jobs.retry_later",
+                   (n, t + min(60, 2 ** min(n, 6)), t, err, job["id"]))
+        log.info("задание %d: %s недоступен (%s), попытка %d", job["id"], svc, e, n)
+        return False
+    if st == 200 and isinstance(data, dict):
+        DB.run("jobs.finish", (t, job_done(job, inp, data), job["id"]))
+    else:
+        err = data if isinstance(data, dict) else {"error": "bad_response", "service": svc, "message": "HTTP %d" % st}
+        DB.run("jobs.fail", (t, json.dumps(err, ensure_ascii=False), job["id"]))
+        if job["kind"] == "transcribe":
+            drop_audio(inp)  # кусок не читается: хранить его незачем
+        if job["kind"] == "deidentify":
+            DB.run("transcripts.fail", (json.dumps(err, ensure_ascii=False), t, job["appt_id"]))
+    return True
+
+
+def jobs_loop(stop_evt, svc):
+    kinds = JOB_SERVICES[svc]["kinds"]
+    while not stop_evt.is_set():
+        JOB_EVTS[svc].wait(1.0)
+        JOB_EVTS[svc].clear()
+        if not service_enabled(svc):
+            continue
+        try:
+            for job in DB.q("jobs.due", (now(), list(kinds))):
+                if stop_evt.is_set() or not run_job(job, svc):
+                    break  # сервис недоступен: остальные ждут своей очереди
+        except DatabaseUnavailable:
+            pass  # база недоступна: очередь подождёт
+        except Exception:
+            log.exception("очередь заданий %s", svc)
+
+
+def jobs_cleanup():
+    old = now() - JOB_KEEP
+    for job in DB.q("jobs.old_transcribe_inputs", (old,)):
+        drop_audio(json.loads(job["input"]))
+    DB.run("jobs.delete_old", (old,))
+    DB.run("speech.delete_old", (now() - TRANSCRIPT_DAYS * 86400,))
+    # исходник живёт в соответствии замен: по сроку хранения оно удаляется, обезличенный текст остаётся
+    DB.run("transcripts.drop_old_originals", (now() - TRANSCRIPT_DAYS * 86400,))
+
+
 class Srv(ThreadingHTTPServer):
     daemon_threads = True
     allow_reuse_address = True
@@ -1427,9 +1940,13 @@ def in_jupyter():
 def main():
     global DB, _MARS_RUNNING
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
-    for sub in ("", "files", "photos", "vendor"):
+    for sub in ("", "files", "photos", "vendor", "audio"):
         (DATA_DIR / sub).mkdir(parents=True, exist_ok=True)
-    DB = Database(DATA_DIR / "mars.sqlite3")
+    try:
+        DB = open_db()
+    except DatabaseUnavailable:
+        print("Сервис database не отвечает: gateway не запущен")
+        return
     bootstrap_admin()
     ensure_vendor()
     stop_evt = threading.Event()
@@ -1447,6 +1964,8 @@ def main():
     rt = Runtime(httpd, DB, stop_evt, COND)
     _MARS_RUNNING = rt
     threading.Thread(target=cleanup_loop, args=(stop_evt,), daemon=True).start()
+    for svc in JOB_SERVICES:
+        threading.Thread(target=jobs_loop, args=(stop_evt, svc), daemon=True).start()
     scheme = "https" if SECURE else "http"
     print("M.A.R.S.: %s://localhost:%d  (центр: %s)" % (scheme, PORT, CENTER_NAME))
     if not SECURE:
@@ -2405,13 +2924,13 @@ const CallUi = {
     R.wrap = h('div', { class: 'callwrap' }, R.stage, R.self, R.vtop, R.vmsg, R.pq, R.hint, R.bar);
     R.center = h('div', { class: 'center' }, R.wrap);
     /* панели */
-    const tabs = isDoc ? [['card', 'Карточка', 'user'], ['chat', 'Чат', 'chat'], ['files', 'Файлы', 'file'], ['concl', 'Заключение', 'doc'], ['face', 'Лицо', 'face']]
+    const tabs = isDoc ? [['card', 'Карточка', 'user'], ['chat', 'Чат', 'chat'], ['files', 'Файлы', 'file'], ['tr', 'Расшифровка', 'text'], ['concl', 'Заключение', 'doc'], ['face', 'Лицо', 'face']]
       : [['chat', 'Чат', 'chat'], ['files', 'Файлы', 'file'], ['face', 'Задания', 'face']];
     const content = {
       chat: Chat.build(), files: Files.build(),
       face: isDoc ? FaceMesh.doctorPane() : FaceMesh.patientPane()
     };
-    if (isDoc) { R.cardBody = Record.cardPane(); content.card = R.cardBody; content.concl = Record.conclPane(); }
+    if (isDoc) { R.cardBody = Record.cardPane(); content.card = R.cardBody; content.concl = Record.conclPane(); content.tr = Transcript.build(); }
     for (const [k] of tabs) this.panes[k] = h('section', { class: 'pane', id: 'pane-' + k, role: 'tabpanel' }, k === 'card' ? null : content[k]);
     if (isDoc) this.panes.card.append(R.cardBody);
     R.tabs = h('div', { class: 'tabs', role: 'tablist' }, tabs.map(([k, label]) => { const b = h('button', { role: 'tab', 'aria-selected': 'false', onclick: () => this.showTab(k) }, label); this.tabBtn[k] = b; return b; }));
@@ -2430,6 +2949,7 @@ const CallUi = {
     if (Rtc.remote) this.setRemote(Rtc.remote);
     this.makeDraggable(R.self, R.wrap);
     this.shareChanged(false); this.syncBtns();
+    Speech.mount(R.vtop);
     FaceMesh.mount({ role: State.v.role, remote: R.remote, local: R.local, ovR: R.ovR, ovL: R.ovL, stage: R.stage, wrap: R.wrap, hint: R.hint, pq: R.pq });
     if (isDoc) { Files.history(); }
     if (this.timerFn) Loop.del(this.timerFn);
@@ -2455,6 +2975,7 @@ const CallUi = {
     R.layout.dataset.ptab = name; this.markPbar(name);
     if (R.layout.classList.contains('pat')) { if (window.matchMedia('(max-width:700px)').matches === false) { R.layout.classList.remove('noside'); if (R.bSide) R.bSide.setAttribute('aria-pressed', 'true'); } }
     if (name === 'chat') Chat.focusEnd();
+    if (name === 'tr') Transcript.load();
   },
   markPbar(n) { for (const b of this.r.pbar.querySelectorAll('button')) b.setAttribute('aria-selected', String(b.dataset.t === n)); },
   setRemote(stream) {
@@ -2527,7 +3048,8 @@ const CallUi = {
     const ao = h('button', { class: 'btn sec', onclick: () => { Media.setAudioOnly(Media.camOn); this.syncBtns(); ao.textContent = Media.camOn ? 'Включить режим «Только аудио»' : 'Выключить режим «Только аудио»'; } }, icon('audio'), Media.camOn ? 'Включить режим «Только аудио»' : 'Выключить режим «Только аудио»');
     const fs = h('button', { class: 'btn sec', onclick: () => { s.close(); this.fullscreen(); } }, icon('full'), 'Полный экран');
     const big = h('button', { class: 'btn sec', onclick: () => Ui.big() }, icon('text'), 'Крупный шрифт');
-    s.el.append(h('div', { class: 'stack' }, ao, fs, big));
+    const sp = State.v.role === 'doctor' ? h('button', { class: 'btn sec', onclick: () => { s.close(); Speech.request(); } }, icon('audio'), Speech.on ? 'Остановить расшифровку речи' : 'Включить расшифровку речи') : null;
+    s.el.append(h('div', { class: 'stack' }, ao, fs, big, sp));
   },
   fullscreen() {
     const el = this.r.wrap; if (!el) return;
@@ -2578,11 +3100,12 @@ const Events = {
       case 'restart_ice': if (doc) { Rtc.offer(true); } break;
       case 'reset_patient': break;
       case 'face_consent': if (doc) FaceMesh.setConsent(!!d.granted); break;
+      case 'speech_request': case 'speech_consent': case 'speech_stop': Speech.control(d); break;
       default: if (!doc) FaceMesh.patientRequest(d); break;
     }
   },
   ended() {
-    Rtc.close(); Quality.stop(); FaceMesh.stopAll(); Media.stop(); clearInterval(Session.hb);
+    Speech.stop(); Rtc.close(); Quality.stop(); FaceMesh.stopAll(); Media.stop(); clearInterval(Session.hb);
     State.set({ status: 'completed', rtc: 'closed' });
     if (CallUi.r.remote) { CallUi.r.remote.srcObject = null; CallUi.r.local.srcObject = null; }
     CallUi.refresh();
@@ -2873,7 +3396,7 @@ const App = {
   },
   teardown() {
     Poller.stop(); clearInterval(Session.hb); clearInterval(Appointments.timer);
-    Rtc.close(); Quality.stop(); FaceMesh.stopAll(); Media.stop(); Ui.closeAudio();
+    Speech.stop(); Rtc.close(); Quality.stop(); FaceMesh.stopAll(); Media.stop(); Ui.closeAudio();
     Api.room = null; Api.token = null; State.set({ view: '', rtc: 'idle', status: 'planned', peerHere: false, faceConsent: false });
     if (CallUi.timerFn) Loop.del(CallUi.timerFn);
     Header.update();
@@ -2888,7 +3411,7 @@ const App = {
     const doc = State.v.role === 'doctor';
     try { sessionStorage.removeItem('mars_pt_' + Session.code); } catch (e) { /* ignore */ }
     Poller.stop(); clearInterval(Session.hb); clearInterval(Appointments.timer);
-    Rtc.close(); Quality.stop(); FaceMesh.stopAll(); Media.stop(); Ui.closeAudio(); Ui.closeAll(); Loop.stop();
+    Speech.stop(); Rtc.close(); Quality.stop(); FaceMesh.stopAll(); Media.stop(); Ui.closeAudio(); Ui.closeAll(); Loop.stop();
     Api.room = null; Api.token = null; Chat.list = null; Files.box = null; CallUi.r = {};
     $('#printArea').replaceChildren();
     State.set({ view: 'killed', rtc: 'closed', status: 'completed', peerHere: false });
@@ -2900,7 +3423,7 @@ const App = {
   roomGone(e) {
     if (this.dead) return;
     if (e && e.status === 410) { this.killed(); return; }
-    Poller.stop(); clearInterval(Session.hb); Rtc.close(); Quality.stop(); FaceMesh.stopAll(); Media.stop();
+    Poller.stop(); clearInterval(Session.hb); Speech.stop(); Rtc.close(); Quality.stop(); FaceMesh.stopAll(); Media.stop();
     $('#main').replaceChildren(h('div', { class: 'center-col' }, h('h2', { text: 'Сеанс недоступен' }),
       h('p', { class: 'mut', text: 'Комната не найдена или доступ к ней потерян (возможно, сервер перезапущен).' }),
       h('button', { class: 'btn pri', onclick: () => { try { sessionStorage.removeItem('mars_pt_' + Session.code); } catch (x) { /* ignore */ } location.reload(); } }, 'Начать заново')));
@@ -2935,7 +3458,43 @@ const deg = r => r * 180 / Math.PI;
 const FaceMesh = {
   role: null, consent: false, mode: 'off', coach: false, autocrop: false, secondary: false, tol: 5, poses: ['frontal', 'left45', 'right45', 'left90', 'right90'],
   trk: null, trk2: null, els: {}, cal: null, latest: {}, info: null, unavailable: '', busy: 0, subs: new Set(), lastAssess: 0, lastSend: 0, motion: [], timers: [], photos: [], dpr: 1, sizes: new Map(), accent: '#007AFF', accT: 0,
-  Loader: {}, Overlay: {}, Pose: {}, Symmetry: {}, Mobility: {}, Capture: {}, Compare: {}, Calibrate: {}, Privacy: {}, Report: {}
+  Loader: {}, Overlay: {}, Pose: {}, Symmetry: {}, Mobility: {}, Capture: {}, Compare: {}, Calibrate: {}, Privacy: {}, Report: {}, Remote: {}
+};
+
+/* --- Remote: расчёт метрик в сервисе vision через очередь заданий gateway.
+   Если сервис недоступен или не успел ответить, используется расчёт на устройстве. --- */
+FaceMesh.Remote = {
+  WAIT: 6000, down: false,
+  /* компактный кадр: только нужные точки и коэффициенты */
+  pack(cur, idx, names) {
+    const lm = {}, bs = {};
+    if (idx) for (const i of idx) { const p = cur.lm[i]; if (p) lm[i] = [p.x, p.y, p.z]; }
+    if (cur.bs) for (const c of cur.bs) if (!names || names.includes(c.categoryName)) bs[c.categoryName] = c.score;
+    return { lm, mat: cur.mat ? Array.from(cur.mat) : null, bs, vw: cur.vw, vh: cur.vh, multi: !!cur.multi };
+  },
+  key() { return crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36) + Math.random().toString(36).slice(2, 12); },
+  /* результат vision или null; ошибка расчёта (например, мало кадров) пробрасывается */
+  async run(kind, input, signal) {
+    if (!Api.room) return null;
+    let job;
+    try { job = await Api.post('/rooms/' + Api.room + '/analyze', { kind, key: this.key(), input }, { signal }); }
+    catch (e) { if (e && e.name === 'AbortError') throw e; if (!(e && e.status === 503)) console.warn('vision', e); return null; }
+    const t0 = performance.now();
+    while (job.status === 'queued' || job.status === 'running') {
+      if (performance.now() - t0 > this.WAIT) return null;
+      await new Promise(r => setTimeout(r, 400));
+      job = await Api.get('/rooms/' + Api.room + '/jobs/' + job.id, { signal }).catch(e => { if (e && e.name === 'AbortError') throw e; return job; });
+    }
+    if (job.status === 'done') return job.result;
+    throw new Error((job.error && job.error.message) || 'Ошибка анализа');
+  },
+  async pick(kind, input, local, signal, downMsg) {
+    const r = await this.run(kind, input, signal);
+    if (r) { this.down = false; r.source = 'vision'; return r; }
+    if (!this.down) Toast.show(downMsg || 'Сервис анализа временно недоступен: расчёт выполнен на этом устройстве');
+    this.down = true; local.source = 'device';
+    return local;
+  }
 };
 
 /* --- Loader: локальные файлы MediaPipe с /vendor --- */
@@ -3193,18 +3752,19 @@ FaceMesh.Symmetry = {
     const F = FaceMesh, trk = F.trk, secs = 2.5, need = 12;
     return new Promise((res, rej) => {
       if (!trk) return rej(new Error('Модуль не запущен'));
-      const S = []; let t0 = 0, fail = null; const t00 = performance.now();
+      const S = [], FR = []; let t0 = 0, fail = null; const t00 = performance.now();
       const fn = cur => {
         if (signal && signal.aborted) { done(new Error('Отменено')); return; }
         const e = F.Pose.euler(cur);
-        if (!F.Pose.inTol(e, F.tol) || cur.multi && false) { t0 = 0; S.length = 0; onProgress(0, 'Выровняйте голову: ' + (e ? 'yaw ' + e.yaw.toFixed(0) + ', pitch ' + e.pitch.toFixed(0) + ', roll ' + e.roll.toFixed(0) : '')); return; }
+        if (!F.Pose.inTol(e, F.tol) || cur.multi && false) { t0 = 0; S.length = 0; FR.length = 0; onProgress(0, 'Выровняйте голову: ' + (e ? 'yaw ' + e.yaw.toFixed(0) + ', pitch ' + e.pitch.toFixed(0) + ', roll ' + e.roll.toFixed(0) : '')); return; }
         if (!t0) t0 = performance.now();
-        const v = this.one(cur); if (v) S.push(v);
+        const v = this.one(cur); if (v) { S.push(v); FR.push(F.Remote.pack(cur, this.IDX, [])); }
         const p = Math.min(1, (performance.now() - t0) / (secs * 1000)); onProgress(p, 'Держите позу');
-        if (p >= 1) { if (S.length >= need) done(null); else { t0 = 0; S.length = 0; } }
+        if (p >= 1) { if (S.length >= need) done(null); else { t0 = 0; S.length = 0; FR.length = 0; } }
       };
-      const tm = setInterval(() => { if (performance.now() - t00 > 25000) done(new Error('Не удалось получить устойчивую позу в допуске за отведённое время')); else if (trk.lost()) { t0 = 0; S.length = 0; onProgress(0, 'Лицо не найдено'); } }, 400);
-      const done = err => { clearInterval(tm); F.subs.delete(fn); if (err) rej(err); else res(this.build(S, F.cal)); };
+      const tm = setInterval(() => { if (performance.now() - t00 > 25000) done(new Error('Не удалось получить устойчивую позу в допуске за отведённое время')); else if (trk.lost()) { t0 = 0; S.length = 0; FR.length = 0; onProgress(0, 'Лицо не найдено'); } }, 400);
+      /* кадры для сервиса vision: неперечисляемое поле, в протокол не попадает */
+      const done = err => { clearInterval(tm); F.subs.delete(fn); if (err) return rej(err); const out = this.build(S, F.cal); Object.defineProperty(out, '_frames', { value: FR }); res(out); };
       F.subs.add(fn);
     });
   }
@@ -3226,9 +3786,10 @@ FaceMesh.Mobility = {
     const F = FaceMesh, secs = 4, tol = Math.max(F.tol * 2, 10);
     return new Promise((res, rej) => {
       if (!F.trk) return rej(new Error('Модуль не запущен'));
-      const t0 = performance.now(); let mr = 0, ml = 0, ms = 0, n = 0;
+      const t0 = performance.now(), FR = [], names = task.single ? [task.single] : [task.r, task.l]; let mr = 0, ml = 0, ms = 0, n = 0;
       const fn = cur => {
         if (signal && signal.aborted) { fin(new Error('Отменено')); return; }
+        if (FR.length < 400) FR.push(F.Remote.pack(cur, [LM.REO, LM.LEO, LM.NOSE], names));
         const e = F.Pose.euler(cur);
         if (!F.Pose.inTol(e, tol)) { onProgress((performance.now() - t0) / (secs * 1000), 'Смотрите в камеру'); return; }
         n++;
@@ -3242,6 +3803,7 @@ FaceMesh.Mobility = {
         if (n < 10) return rej(new Error('Недостаточно кадров с лицом в допустимой позе. Повторите задание.'));
         const o = { id: task.id, label: task.label };
         if (task.single) o.single = ms; else { o.right = mr; o.left = ml; o.ratio = Math.max(mr, ml) > 0.05 ? Math.min(mr, ml) / Math.max(mr, ml) : null; }
+        Object.defineProperty(o, '_frames', { value: FR });
         res(o);
       };
       F.subs.add(fn);
@@ -3464,7 +4026,7 @@ Object.assign(FaceMesh, {
   symTable(p, forPrint) {
     const k = p.calibration && p.calibration.ipd_mm, rows = p.rows || [];
     const unit = k ? ' (МЗР / мм)' : ' (доли МЗР)';
-    const src = k ? ' Источник масштаба: ' + p.calibration.label + '.' : ' Калибровки нет: значения в мм не показываются.';
+    const src = (k ? ' Источник масштаба: ' + p.calibration.label + '.' : ' Калибровки нет: значения в мм не показываются.') + (p.source === 'device' ? ' Рассчитано на устройстве.' : p.source === 'vision' ? ' Рассчитано сервисом анализа.' : '');
     return h('div', { class: 'stack' },
       h('table', { class: 'tb' }, h('tr', null, h('th', { text: 'Метрика' + unit }), h('th', { class: 'n', text: 'Правая' }), h('th', { class: 'n', text: 'Левая' }), h('th', { class: 'n', text: 'Разность' })),
         rows.map(r => h('tr', null, h('td', { text: r.label }), h('td', { class: 'n', text: fx(r.right) + (k ? ' / ' + fx(r.right_mm, 1) : '') }), h('td', { class: 'n', text: fx(r.left) + (k ? ' / ' + fx(r.left_mm, 1) : '') }), h('td', { class: 'n', text: fx(r.diff) + (k ? ' / ' + fx(r.diff_mm, 1) : '') })))),
@@ -3502,7 +4064,10 @@ Object.assign(FaceMesh, {
     const go = async () => {
       T.body.replaceChildren();
       try {
-        const res = await this.Symmetry.run((p, msg) => { T.prog.value = p; T.hint.textContent = (this.trk && this.trk.lost()) ? 'Лицо не найдено' : msg; }, T.signal);
+        const loc = await this.Symmetry.run((p, msg) => { T.prog.value = p; T.hint.textContent = (this.trk && this.trk.lost()) ? 'Лицо не найдено' : msg; }, T.signal);
+        if (T.isClosed()) return;
+        T.hint.textContent = 'Расчёт...';
+        const res = await this.Remote.pick('symmetry', { frames: loc._frames, tolerance: this.tol, calibration: this.cal }, loc, T.signal);
         if (T.isClosed()) return;
         T.hint.textContent = 'Готово'; T.prog.value = 1;
         T.body.replaceChildren(this.symTable(res), h('div', { class: 'row wrap' },
@@ -3516,16 +4081,21 @@ Object.assign(FaceMesh, {
     if (!(await this.ensureConsent())) return;
     this.busy++; await this.sync(); if (!this.trk) { this.busy--; return; }
     const T = this.taskSheet('Подвижность лица'), out = [];
+    const finish = async () => {
+      const loc = { kind: 'mobility', pose_ok: true, tolerance: Math.max(this.tol * 2, 10), tasks: out.slice(), ts: Math.floor(Date.now() / 1000) };
+      T.hint.textContent = 'Расчёт...'; T.body.replaceChildren();
+      let res;
+      try { res = await this.Remote.pick('mobility', { tasks: out.map(t => ({ id: t.id, frames: t._frames })), tolerance: this.tol }, loc, T.signal); }
+      catch (e) { if (T.isClosed()) return; T.hint.textContent = ''; T.body.replaceChildren(h('p', { text: e.message }), h('button', { class: 'btn pri', onclick: () => { out.length = 0; next(0); } }, 'Пройти заново')); return; }
+      if (T.isClosed()) return;
+      T.hint.textContent = 'Готово'; T.prog.value = 1;
+      T.body.replaceChildren(this.mobTable(res), h('div', { class: 'row wrap' },
+        h('button', { class: 'btn pri', onclick: async e => { e.target.disabled = true; if (await this.sendResult(res)) T.s.close(); else e.target.disabled = false; } }, 'Отправить врачу'),
+        h('button', { class: 'btn sec', onclick: () => { out.length = 0; next(0); } }, 'Пройти заново')));
+    };
     const next = i => {
       if (T.isClosed()) return;
-      if (i >= this.Mobility.TASKS.length) {
-        const res = { kind: 'mobility', pose_ok: true, tolerance: Math.max(this.tol * 2, 10), tasks: out, ts: Math.floor(Date.now() / 1000) };
-        T.hint.textContent = 'Готово'; T.prog.value = 1;
-        T.body.replaceChildren(this.mobTable(res), h('div', { class: 'row wrap' },
-          h('button', { class: 'btn pri', onclick: async e => { e.target.disabled = true; if (await this.sendResult(res)) T.s.close(); else e.target.disabled = false; } }, 'Отправить врачу'),
-          h('button', { class: 'btn sec', onclick: () => { out.length = 0; next(0); } }, 'Пройти заново')));
-        return;
-      }
+      if (i >= this.Mobility.TASKS.length) return finish();
       const task = this.Mobility.TASKS[i];
       T.prog.value = 0; T.hint.textContent = task.label + '. Нажмите «Начать»';
       T.body.replaceChildren(h('button', { class: 'btn pri lg', onclick: async () => {
@@ -4000,18 +4570,20 @@ FaceMesh.Compare = {
       try { this.l.close(); } catch (e) { /* ignore */ } this.l = null;
       if (closed) return;
       if (!A || !B) { body.replaceChildren(h('p', { text: 'Лицо не найдено на ' + (!A && !B ? 'обоих снимках' : (!A ? 'снимке «до»' : 'снимке «после»')) + '. Если снимок был сохранён со скрытым лицом, сравнить его нельзя.' })); return; }
-      this.show(body, s, ia, ib, A, B, before, after, pose);
+      const loc = this.calc(A, B, pose, F.tol, F.cal), side = (X, p) => ({ id: p.id, ts: p.ts, frame: F.Remote.pack(X, this.IDX, []) });
+      const R = await F.Remote.pick('compare', { before: side(A, before), after: side(B, after), pose, tolerance: F.tol, calibration: F.cal }, loc, null,
+        'Анализ временно недоступен, снимок сохранён и будет обработан позже. Сейчас показан расчёт на этом устройстве');
+      if (closed) return;
+      this.show(body, s, ia, ib, R, before, after, pose);
     } catch (e) { console.error(e); if (!closed) body.replaceChildren(h('p', { text: 'Не удалось выполнить сравнение: ' + ((e && e.message) || 'ошибка') })); }
   },
-  show(body, sheet, ia, ib, A, B, before, after, pose) {
-    const F = FaceMesh, tgt = POSE_YAW[pose], tol = F.tol, mm = pose === 'frontal' && F.cal && F.cal.ipd_mm ? F.cal : null;
+  IDX: [33, 133, 362, 263, 6, 1, 168, 10, 105, 334, 61, 291, 152, 468, 473],
+  /* расчёт сравнения по точкам двух снимков; тот же результат отдаёт сервис vision (/v1/compare) */
+  calc(A, B, pose, tol, cal) {
+    const F = FaceMesh, tgt = POSE_YAW[pose], mm = pose === 'frontal' && cal && cal.ipd_mm ? cal : null;
     const chk = X => { const e = F.Pose.euler(X); if (!e) return { ok: false, e: null }; const dy = pose === 'frontal' ? Math.abs(e.yaw) : Math.abs(Math.abs(e.yaw) - Math.abs(tgt)); return { ok: dy <= tol && Math.abs(e.pitch) <= tol && Math.abs(e.roll) <= tol, e }; };
     const ca = chk(A), cb = chk(B), poseOk = ca.ok && cb.ok && !!A.mat && !!B.mat;
     const T = this.procrustes(A, B);
-    const W = ia.naturalWidth, H = ia.naturalHeight;
-    const cv = document.createElement('canvas'); cv.width = W; cv.height = H; cv.setAttribute('aria-label', 'Сравнение снимков до и после');
-    const ctx = cv.getContext('2d');
-    const st = { mode: 'wipe', pos: 50, arrows: true };
     /* нормировка: по МЗР для анфаса, по высоте лица для остальных ракурсов */
     const dist = (X, i, j) => Math.hypot((X.lm[i].x - X.lm[j].x) * X.vw, (X.lm[i].y - X.lm[j].y) * X.vh);
     const normName = pose === 'frontal' ? 'ipd' : 'face_height', norm = normName === 'ipd' ? dist(A, 468, 473) : dist(A, 10, 152);
@@ -4022,6 +4594,14 @@ FaceMesh.Compare = {
       if (mm) { o.dx_mm = dx * mm.ipd_mm; o.dy_mm = dy * mm.ipd_mm; }
       return o;
     });
+    return { kind: 'compare', pose, tolerance: tol, T, rows, ca, cb, pose_ok: poseOk, norm: normName, mm, multi: [!!A.multi, !!B.multi] };
+  },
+  show(body, sheet, ia, ib, R, before, after, pose) {
+    const F = FaceMesh, tol = R.tolerance, mm = R.mm, T = R.T, rows = R.rows, ca = R.ca, cb = R.cb, poseOk = R.pose_ok, normName = R.norm;
+    const W = ia.naturalWidth, H = ia.naturalHeight;
+    const cv = document.createElement('canvas'); cv.width = W; cv.height = H; cv.setAttribute('aria-label', 'Сравнение снимков до и после');
+    const ctx = cv.getContext('2d');
+    const st = { mode: 'wipe', pos: 50, arrows: true };
     const render = () => {
       ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.clearRect(0, 0, W, H); ctx.globalAlpha = 1;
       ctx.drawImage(ia, 0, 0, W, H);
@@ -4049,14 +4629,14 @@ FaceMesh.Compare = {
       rows.map(r => h('tr', null, h('td', { text: r.label }), h('td', { class: 'n', text: f(mm ? r.dx_mm : r.dx) }), h('td', { class: 'n', text: f(mm ? r.dy_mm : r.dy) }))));
     const warn = [];
     if (!poseOk) warn.push('Поза на одном или обоих снимках вне допуска ' + tol + ' градусов от цели (до: ' + (ca.e ? 'yaw ' + ca.e.yaw.toFixed(0) + ', pitch ' + ca.e.pitch.toFixed(0) + ', roll ' + ca.e.roll.toFixed(0) : 'нет данных') + '; после: ' + (cb.e ? 'yaw ' + cb.e.yaw.toFixed(0) + ', pitch ' + cb.e.pitch.toFixed(0) + ', roll ' + cb.e.roll.toFixed(0) : 'нет данных') + '). Результат ориентировочный и в протокол не сохраняется.');
-    if (A.multi || B.multi) warn.push('На снимке найдено более одного лица: использовано самое крупное.');
+    if (R.multi && (R.multi[0] || R.multi[1])) warn.push('На снимке найдено более одного лица: использовано самое крупное.');
     if (pose === 'frontal' && !mm) warn.push('Калибровки нет: значения даны в долях межзрачкового расстояния, не в миллиметрах.');
     if (mm && mm.approx) warn.push('Калибровка по радужке приблизительная: миллиметры ориентировочные. Для точности используйте калибровку по карте.');
     if (pose !== 'frontal') warn.push('Для ракурса, отличного от анфаса, миллиметры не показываются: расстояния искажены поворотом.');
     const msg = h('div', { class: 'stack' }, warn.map(w => h('div', { class: 'banner warn', style: 'border-radius:10px', text: w })));
     const saveBtn = h('button', { class: 'btn pri', disabled: !poseOk || null, onclick: async e => {
       e.target.disabled = true;
-      const payload = { kind: 'compare', pose_ok: true, pose, before_id: before.id, after_id: after.id, before_ts: before.ts, after_ts: after.ts, norm: normName, scale: T.scale, rotation_deg: T.angle, tolerance: tol, rows: rows.map(r => { const o = { id: r.id, label: r.label, dx: r.dx, dy: r.dy }; if (mm) { o.dx_mm = r.dx_mm; o.dy_mm = r.dy_mm; } return o; }), ts: Math.floor(Date.now() / 1000) };
+      const payload = { kind: 'compare', pose_ok: true, source: R.source, pose, before_id: before.id, after_id: after.id, before_ts: before.ts, after_ts: after.ts, norm: normName, scale: T.scale, rotation_deg: T.angle, tolerance: tol, rows: rows.map(r => { const o = { id: r.id, label: r.label, dx: r.dx, dy: r.dy }; if (mm) { o.dx_mm = r.dx_mm; o.dy_mm = r.dy_mm; } return o; }), ts: Math.floor(Date.now() / 1000) };
       if (mm) payload.calibration = mm;
       try { await Api.post('/rooms/' + Api.room + '/measurements', payload); F.hist = null; Toast.show('Сравнение сохранено в протокол'); } catch (er) { Toast.err(er); e.target.disabled = false; }
     } }, 'Сохранить в протокол');
@@ -4083,6 +4663,12 @@ FaceMesh.Report = {
     const rep = { kind: 'report', center: a.center || Cfg.center, patient: a.patient_name || '', doctor: a.doctor || '', appointment_id: a.id, date: fmtDT(Math.floor(Date.now() / 1000)), ts: Math.floor(Date.now() / 1000), symmetry: sym || null, mobility: mob || null, compare: cmpList, photo_ids: F.photos.map(p => ({ id: p.id, pose: p.pose, ts: p.ts })) };
     const cal = (sym && sym.calibration) || (cmpList.find(c => c.calibration) || {}).calibration || F.cal;
     if (cal) rep.calibration = cal;
+    /* ход консультации: только обезличенный текст, проверенный врачом */
+    try {
+      const tr = await Api.get('/rooms/' + Api.room + '/transcript');
+      if (tr.deid && tr.deid.status === 'done' && tr.deid.confirmed) rep.transcript = { segments: tr.deid.segments.map(g => ({ role: g.role, t: g.t, text: g.text })) };
+      else if (tr.deid && tr.deid.status !== 'none') rep.transcript_note = 'Расшифровка не включена: обезличенный текст ещё не проверен врачом.';
+    } catch (e) { /* расшифровки нет или сервис недоступен: раздел не выводится */ }
     return { rep, hist };
   },
   async make(out) {
@@ -4106,6 +4692,11 @@ FaceMesh.Report = {
       kids.push(h('h2', { text: 'Сравнение до и после: ' + (POSE_NAMES[c.pose] || c.pose) }), h('p', { text: 'До: ' + fmtDT(c.before_ts) + '. После: ' + fmtDT(c.after_ts) + '. Единицы: ' + (c.norm === 'ipd' ? (mm ? 'мм' : 'доли МЗР') : 'доли высоты лица') + '.' }),
         h('table', { class: 'tb' }, h('tr', null, h('th', { text: 'Точка' }), h('th', { class: 'n', text: 'По горизонтали' }), h('th', { class: 'n', text: 'По вертикали' })), c.rows.map(r => h('tr', null, h('td', { text: r.label }), h('td', { class: 'n', text: f(mm ? r.dx_mm : r.dx) }), h('td', { class: 'n', text: f(mm ? r.dy_mm : r.dy) })))));
     }
+    if (rep.transcript && rep.transcript.segments.length) {
+      const t0 = rep.transcript.segments[0].t;
+      kids.push(h('h2', { text: 'Ход консультации' }), h('p', { class: 'sm', text: 'Обезличенная расшифровка речи, проверена врачом. Метки в квадратных скобках скрывают личные данные.' }),
+        h('table', { class: 'tb' }, rep.transcript.segments.map(g => { const s = Math.max(0, Math.round((g.t - t0) / 1000)); return h('tr', null, h('td', { class: 'n', text: pad2(Math.floor(s / 60)) + ':' + pad2(s % 60) }), h('td', { text: g.role === 'doctor' ? 'Врач' : 'Пациент' }), h('td', { text: g.text })); })));
+    }
     if (rep.photo_ids.length) { kids.push(h('h2', { text: 'Снимки приёма' }), h('div', { class: 'thumbs' }, rep.photo_ids.map(p => F.thumbEl(p)))); }
     kids.push(h('p', { class: 'sm', text: 'Документ содержит числовые наблюдения для документирования. Он не является диагнозом и не заменяет клинической оценки врача. ' + SIGN_SYM + '. ' + SIGN_MOB + '.' }),
       h('div', { class: 'sign', text: 'Подпись врача ______________________ / ' + rep.doctor + ' /' }));
@@ -4113,9 +4704,9 @@ FaceMesh.Report = {
   },
   show(out, rp) {
     const F = FaceMesh, rep = rp.rep;
-    const none = !rep.symmetry && !rep.mobility && !(rep.compare && rep.compare.length) && !rep.photo_ids.length;
+    const none = !rep.symmetry && !rep.mobility && !(rep.compare && rep.compare.length) && !rep.photo_ids.length && !rep.transcript;
     out.replaceChildren(
-      h('p', { class: 'note', style: 'margin:0', text: 'Отчёт сформирован ' + rep.date + '. Симметрия: ' + (rep.symmetry ? 'есть' : 'нет') + '; подвижность: ' + (rep.mobility ? 'есть' : 'нет') + '; сравнений: ' + (rep.compare || []).length + '; снимков: ' + rep.photo_ids.length + '; графиков: ' + (rp.trends || []).length + '.' }),
+      h('p', { class: 'note', style: 'margin:0', text: 'Отчёт сформирован ' + rep.date + '. Симметрия: ' + (rep.symmetry ? 'есть' : 'нет') + '; подвижность: ' + (rep.mobility ? 'есть' : 'нет') + '; сравнений: ' + (rep.compare || []).length + '; снимков: ' + rep.photo_ids.length + '; графиков: ' + (rp.trends || []).length + '; расшифровка: ' + (rep.transcript ? 'есть (обезличена)' : rep.transcript_note ? 'не проверена' : 'нет') + '.' }),
       ...(none ? [h('div', { class: 'banner warn', style: 'border-radius:10px', text: 'В этом приёме пока нет данных для отчёта.' })] : []),
       h('div', { class: 'row wrap' },
         h('button', { class: 'btn pri', onclick: async () => {
@@ -4126,6 +4717,212 @@ FaceMesh.Report = {
         } }, 'Печать или PDF'),
         h('button', { class: 'btn sec', onclick: () => Ui.download('отчёт-лицо-' + (rep.appointment_id || 'приём') + '.json', JSON.stringify(rep, null, 2)) }, icon('download'), 'Скачать JSON'),
         h('button', { class: 'btn sec', onclick: async e => { e.target.disabled = true; try { await Api.post('/rooms/' + Api.room + '/measurements', rep); Toast.show('Отчёт сохранён в протокол'); } catch (er) { Toast.err(er); } e.target.disabled = false; } }, 'Сохранить в протокол')));
+  }
+};
+
+/* ===== Расшифровка речи: каждая сторона записывает свой микрофон кусками по 10 с ===== */
+/* Кусок записывается отдельным MediaRecorder: так каждый файл читается сам по себе, без заголовка первого куска.
+   Разделение «врач и пациент» получается само: у каждого свой микрофон. */
+const Speech = {
+  CHUNK: 10000, MAXQ: 90, on: false, consent: false, rec: null, seq: 0, sid: '', q: [], sending: false, tm: null, chip: null, poll: null, st: null,
+  mime() { for (const m of ['audio/webm;codecs=opus', 'audio/ogg;codecs=opus', 'audio/mp4']) if (window.MediaRecorder && MediaRecorder.isTypeSupported(m)) return m; return ''; },
+  mount(vtop) {
+    this.chip = h('button', { class: 'chip o hidden', style: 'pointer-events:auto;border:0;cursor:pointer', 'aria-live': 'polite', onclick: () => this.chipClick() });
+    vtop.insertBefore(this.chip, vtop.children[1] || null);
+    const sp = (App.proto && App.proto.speech) || {};
+    this.consent = !!sp.consent;
+    this.set(!!(sp.consent && sp.active) && State.v.status !== 'completed');
+  },
+  /* включить или выключить запись у себя */
+  set(on) {
+    if (on === this.on) return this.paint();
+    this.on = on;
+    if (on) {
+      if (!this.mime() || !Media.stream || !Media.stream.getAudioTracks().length) { this.on = false; Toast.show('Запись речи недоступна в этом браузере'); return this.paint(); }
+      this.sid = Remote_key(); this.seq = 0; this.t00 = performance.now(); this.cycle();
+      if (State.v.role === 'doctor') { clearInterval(this.poll); this.poll = setInterval(() => this.refresh(), 10000); this.refresh(); }
+    } else {
+      clearTimeout(this.tm);
+      if (this.rec && this.rec.state !== 'inactive') this.rec.stop();  // последний неполный кусок тоже уйдёт
+      this.rec = null;
+    }
+    this.paint();
+  },
+  cycle() {
+    if (!this.on) return;
+    const tr = Media.stream && Media.stream.getAudioTracks()[0];
+    if (!tr) { this.set(false); return; }
+    let rec;
+    try { rec = new MediaRecorder(new MediaStream([tr]), { mimeType: this.mime(), audioBitsPerSecond: 32000 }); }
+    catch (e) { console.warn('MediaRecorder', e); this.on = false; this.paint(); Toast.show('Не удалось начать запись речи'); return; }
+    const parts = [], t0 = performance.now(), t00 = this.t00, sid = this.sid, seq = this.seq++;
+    rec.ondataavailable = e => { if (e.data && e.data.size) parts.push(e.data); };
+    rec.onstop = () => {
+      const dur = Math.round(performance.now() - t0);
+      if (parts.length && dur > 500) this.push({ blob: new Blob(parts, { type: rec.mimeType || this.mime() }), dur, seq, off: Math.round(t0 - t00), key: sid + '-' + seq, tries: 0 });
+      if (this.on && this.rec === rec) this.cycle();
+    };
+    this.rec = rec; rec.start();
+    this.tm = setTimeout(() => { if (rec.state !== 'inactive') rec.stop(); }, this.CHUNK);
+  },
+  push(item) {
+    this.q.push(item);
+    if (this.q.length > this.MAXQ) this.q.shift();  // нет связи больше 15 минут: старые куски не держим в памяти
+    this.send();
+  },
+  /* отправка по очереди; при сбое сети повтор с паузой. Сервер хранит кусок, даже если speech недоступен */
+  async send() {
+    if (this.sending || !this.q.length) return;
+    this.sending = true;
+    while (this.q.length) {
+      const it = this.q[0];
+      try {
+        await Api.req('POST', '/rooms/' + Api.room + '/audio', { raw: it.blob, headers: { 'Content-Type': it.blob.type.split(';')[0], 'X-Chunk-Key': it.key, 'X-Seq': String(it.seq), 'X-Duration-Ms': String(it.dur), 'X-Offset-Ms': String(it.off) } });
+        this.q.shift();
+      } catch (e) {
+        if (e && (e.status === 403 || e.status === 410 || e.status === 415 || e.status === 400)) { this.q.shift(); if (e.status === 403) this.set(false); continue; }
+        it.tries++; await new Promise(r => setTimeout(r, Math.min(30000, 1000 * 2 ** Math.min(it.tries, 5))));
+      }
+    }
+    this.sending = false;
+    this.paint();
+  },
+  async refresh() {
+    if (State.v.role !== 'doctor' || !Api.room) return;
+    try { this.st = await Api.get('/rooms/' + Api.room + '/transcript/status'); } catch (e) { return; }
+    if (!this.on && !this.st.queued) { clearInterval(this.poll); this.poll = null; }
+    this.paint();
+  },
+  paint() {
+    const c = this.chip; if (!c) return;
+    const st = this.st, doc = State.v.role === 'doctor';
+    let txt = '';
+    if (this.on) txt = '● Идёт расшифровка речи';
+    else if (doc && st && st.queued) txt = 'Расшифровка: в очереди ' + st.queued;
+    if (txt && doc && st && st.chunks) txt += ' · ' + st.done + ' из ' + st.chunks + (st.service_up === false ? ' · сервис недоступен, куски сохранены' : '');
+    if (this.on && this.q.length > 1) txt += ' · не отправлено ' + this.q.length;
+    c.textContent = txt; c.classList.toggle('hidden', !txt);
+    c.title = doc ? 'Остановить расшифровку' : 'Остановить расшифровку (отозвать согласие)';
+    c.setAttribute('aria-label', txt + '. ' + c.title);
+  },
+  async chipClick() {
+    if (!this.on) return;
+    if (State.v.role === 'doctor') return this.stopByDoctor();
+    if (!(await Ui.confirm('Остановить расшифровку?', 'Запись вашей речи прекратится. Уже расшифрованный текст останется у врача.', 'Остановить', true))) return;
+    this.answer(false);
+  },
+  /* врач: запросить согласие или остановить */
+  async request() {
+    if (this.on) return this.stopByDoctor();
+    try { await Api.ev('control', { action: 'speech_request' }); Toast.show('Пациенту отправлен запрос на согласие'); } catch (e) { Toast.err(e); }
+  },
+  async stopByDoctor() { try { await Api.ev('control', { action: 'speech_stop' }); } catch (e) { Toast.err(e); } },
+  /* пациент: лист согласия */
+  ask() {
+    const s = Ui.sheet({
+      title: 'Согласие на расшифровку речи',
+      actions: [{ label: 'Не согласен(на)', kind: 'sec', onClick: () => this.answer(false) }, { label: 'Согласен(на)', kind: 'pri', onClick: () => this.answer(true) }]
+    });
+    s.el.append(h('p', { style: 'margin:0', text: 'Врач просит включить расшифровку консультации. Что происходит: ваш микрофон записывается кусками по 10 секунд и отправляется на сервер медицинского центра, где речь переводится в текст.' }),
+      h('p', { style: 'margin:0', text: 'Аудиозапись удаляется сразу после расшифровки. Текст видит только врач; в отчёт он попадёт только без ваших личных данных.' }),
+      h('p', { class: 'note', style: 'margin:0', text: 'Согласие можно отозвать в любой момент: нажмите на индикатор «Идёт расшифровка речи» вверху экрана.' }));
+  },
+  async answer(g) { try { await Api.ev('control', { action: 'speech_consent', granted: g }); } catch (e) { Toast.err(e); } },
+  /* события control от сервера */
+  control(d) {
+    if (d.action === 'speech_request') { if (State.v.role === 'patient') this.ask(); return; }
+    if (d.action === 'speech_consent') {
+      this.consent = !!d.granted; this.set(!!d.granted);
+      if (State.v.role === 'doctor') Toast.show(d.granted ? 'Пациент согласился на расшифровку речи' : 'Пациент отказался от расшифровки речи');
+      return;
+    }
+    if (d.action === 'speech_stop') { this.set(false); if (State.v.role === 'patient') Toast.show('Врач остановил расшифровку речи'); }
+  },
+  stop() { this.set(false); }
+};
+const Remote_key = () => (crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36) + Math.random().toString(36).slice(2, 12));
+
+/* ===== Вкладка «Расшифровка» (только врач): обезличенный текст, правки замен, подтверждение для отчёта ===== */
+const Transcript = {
+  el: null, d: null, st: null, timer: null, busy: false,
+  ROLE: { doctor: 'Врач', patient: 'Пациент' },
+  TYPES: [['NAME', 'Имя'], ['ORG', 'Организация'], ['CITY', 'Место'], ['SCHOOL', 'Учебное заведение'], ['OTHER', 'Другое']],
+  build() { this.el = h('div', { class: 'stack' }); this.render(); return this.el; },
+  async load() {
+    if (!Api.room || State.v.role !== 'doctor') return;
+    try { const r = await Api.get('/rooms/' + Api.room + '/transcript'); this.d = r.deid; this.st = r.status; }
+    catch (e) { if (e.status !== 403) Toast.err(e); return; }
+    this.render();
+    clearTimeout(this.timer);
+    if (this.d && this.d.status === 'queued' && CallUi.curTab === 'tr') this.timer = setTimeout(() => this.load(), 4000);
+  },
+  async edit(body) {
+    if (this.busy) return; this.busy = true;
+    try { const r = await Api.post('/rooms/' + Api.room + '/transcript/edit', body); this.d = r.deid; this.render(); }
+    catch (e) { Toast.err(e); }
+    this.busy = false;
+  },
+  async redo() {
+    if (this.d && this.d.status === 'done' && !(await Ui.confirm('Обезличить повторно?', 'Расшифровка будет обезличена заново. Ваши ручные правки и подтверждение будут сброшены.', 'Обезличить'))) return;
+    try { const r = await Api.post('/rooms/' + Api.room + '/transcript/deidentify', {}); this.d = r.deid; this.render(); this.load(); }
+    catch (e) { Toast.err(e); }
+  },
+  async original() {
+    if (!(await Ui.confirm('Показать оригинал?', 'Исходная расшифровка содержит личные данные пациента. Просмотр записывается в журнал аудита.', 'Показать'))) return;
+    let r; try { r = await Api.get('/rooms/' + Api.room + '/transcript/original'); } catch (e) { Toast.err(e); return; }
+    const s = Ui.sheet({ title: 'Исходная расшифровка', wide: true });
+    s.el.append(h('div', { class: 'banner warn', style: 'border-radius:10px', text: 'Содержит личные данные. Не копируйте этот текст в отчёт.' }), this.list(r.segments, false));
+  },
+  addSheet() {
+    const sel = (window.getSelection && String(window.getSelection())).trim();
+    const inp = h('input', { class: 'inp', value: sel, maxlength: 200 });
+    const typ = h('select', { class: 'inp' }, this.TYPES.map(([v, l]) => h('option', { value: v, text: l })));
+    const s = Ui.sheet({ title: 'Добавить замену', actions: [{ label: 'Отмена', kind: 'sec' }, { label: 'Заменить везде', kind: 'pri', onClick: () => { if (inp.value.trim().length < 2) { Toast.show('Введите фрагмент'); return false; } this.edit({ op: 'add', text: inp.value.trim(), type: typ.value }); } }] });
+    s.el.append(h('p', { class: 'note', style: 'margin:0', text: 'Фрагмент будет скрыт меткой во всей расшифровке. Можно выделить его в тексте до нажатия кнопки.' }), Ui.field('Фрагмент', inp), Ui.field('Что это', typ));
+  },
+  /* текст с подсвеченными метками; клик по метке предлагает отменить замену */
+  textNode(text, editable) {
+    const out = [], rx = /\[[A-ZА-ЯЁ_0-9]+\]/g; let pos = 0, m;
+    while ((m = rx.exec(text))) {
+      if (m.index > pos) out.push(text.slice(pos, m.index));
+      const lab = m[0];
+      out.push(editable ? h('button', { class: 'chip b', style: 'border:0;cursor:pointer;margin:0 1px', title: 'Отменить замену', onclick: async () => { if (await Ui.confirm('Отменить замену ' + lab + '?', 'Под этой меткой во всей расшифровке будет показан исходный текст. Делайте это, только если это не личные данные (например, название лекарства).', 'Отменить замену')) this.edit({ op: 'undo', label: lab }); } }, lab)
+        : h('span', { class: 'chip b', style: 'margin:0 1px' }, lab));
+      pos = m.index + lab.length;
+    }
+    if (pos < text.length) out.push(text.slice(pos));
+    return out;
+  },
+  list(segs, editable) {
+    const t0 = segs.length ? segs[0].t : 0;
+    return h('div', { class: 'stack', style: 'gap:8px' }, segs.map(g => {
+      const s = Math.max(0, Math.round((g.t - t0) / 1000));
+      return h('div', null, h('div', { class: 'sm mut' }, (this.ROLE[g.role] || g.role) + ' · ' + pad2(Math.floor(s / 60)) + ':' + pad2(s % 60)),
+        h('p', { style: 'margin:0;line-height:1.6' }, this.textNode(g.text, editable)));
+    }));
+  },
+  render() {
+    const el = this.el; if (!el) return;
+    const d = this.d, st = this.st, kids = [];
+    if (!d) { el.replaceChildren(h('p', { class: 'mut', text: 'Загрузка...' })); return; }
+    const live = st && st.chunks ? 'Кусков записи: ' + st.chunks + ', расшифровано: ' + st.done + (st.queued ? ', в очереди: ' + st.queued : '') + '.' : '';
+    if (d.status === 'none') kids.push(h('p', { style: 'margin:0', text: 'Обезличенной расшифровки пока нет. Она появится после завершения приёма, если пациент дал согласие на расшифровку речи.' }), live ? h('p', { class: 'note', style: 'margin:0', text: live }) : null);
+    if (d.status === 'queued') kids.push(h('div', { class: 'banner', style: 'border-radius:10px', role: 'status', text: d.waiting ? 'Сервис обезличивания временно недоступен. Расшифровка сохранена и будет обезличена, когда сервис заработает.' : 'Идёт обезличивание расшифровки. На процессоре это может занять несколько минут.' }));
+    if (d.status === 'error') kids.push(h('div', { class: 'banner bad', style: 'border-radius:10px', text: 'Не удалось обезличить: ' + ((d.error && d.error.message) || 'ошибка') + '.' }));
+    const btns = [];
+    if (d.status === 'done') {
+      kids.push(h('div', { class: 'row wrap', style: 'gap:8px' }, d.confirmed ? h('span', { class: 'chip g', text: 'Проверено врачом, идёт в отчёт' }) : h('span', { class: 'chip o', text: 'Не проверено: в отчёт не попадает' }),
+        h('span', { class: 'sm mut', text: 'Замен: ' + (d.replacements || []).length + (d.model ? ' · ' + d.model : '') })));
+      kids.push(h('p', { class: 'note', style: 'margin:0', text: 'Проверьте текст: нейросеть может пропустить имя или название. Синие метки скрывают личные данные; нажмите на метку, чтобы отменить замену.' }));
+      if (d.editable) btns.push(h('button', { class: 'btn sec', onclick: () => this.addSheet() }, 'Добавить замену'));
+      btns.push(h('button', { class: 'btn ' + (d.confirmed ? 'sec' : 'pri'), onclick: () => this.edit({ op: d.confirmed ? 'unconfirm' : 'confirm' }) }, d.confirmed ? 'Снять подтверждение' : 'Подтвердить для отчёта'));
+    }
+    if (d.status !== 'none' || (st && st.chunks)) btns.push(h('button', { class: 'btn sec', onclick: () => this.original() }, 'Показать оригинал'));
+    if (d.status === 'done' || d.status === 'error' || (d.status === 'none' && st && st.chunks)) btns.push(h('button', { class: 'btn sec', onclick: () => this.redo() }, d.status === 'none' ? 'Обезличить сейчас' : 'Обезличить повторно'));
+    if (btns.length) kids.push(h('div', { class: 'row wrap' }, btns));
+    if (d.segments && d.segments.length) kids.push(this.list(d.segments, d.status === 'done' && d.editable));
+    else if (d.status === 'done') kids.push(h('p', { class: 'mut', text: 'В записи не найдено речи.' }));
+    el.replaceChildren(...kids.filter(Boolean));
   }
 };
 

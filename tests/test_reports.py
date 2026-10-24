@@ -28,7 +28,7 @@ def check(c, m):
 def main():
     tmp = tempfile.mkdtemp(prefix="mars_r_")
     env = dict(os.environ, DATA_DIR=tmp, PORT=str(BASE), ADMIN_PASSWORD="test-pass-1234")
-    for i, n in enumerate(("vision", "reports", "speech", "assistant"), 1):
+    for i, n in enumerate(("vision", "reports", "speech", "assistant", "database"), 1):
         env["MARS_%s_PORT" % n.upper()] = str(BASE + i)
     p = subprocess.Popen([sys.executable, str(ROOT / "run_all.py"), "--without", "vision,speech,assistant"], env=env,
                          cwd=str(ROOT), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)

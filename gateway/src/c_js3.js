@@ -74,13 +74,13 @@ const CallUi = {
     R.wrap = h('div', { class: 'callwrap' }, R.stage, R.self, R.vtop, R.vmsg, R.pq, R.hint, R.bar);
     R.center = h('div', { class: 'center' }, R.wrap);
     /* панели */
-    const tabs = isDoc ? [['card', 'Карточка', 'user'], ['chat', 'Чат', 'chat'], ['files', 'Файлы', 'file'], ['concl', 'Заключение', 'doc'], ['face', 'Лицо', 'face']]
+    const tabs = isDoc ? [['card', 'Карточка', 'user'], ['chat', 'Чат', 'chat'], ['files', 'Файлы', 'file'], ['tr', 'Расшифровка', 'text'], ['concl', 'Заключение', 'doc'], ['face', 'Лицо', 'face']]
       : [['chat', 'Чат', 'chat'], ['files', 'Файлы', 'file'], ['face', 'Задания', 'face']];
     const content = {
       chat: Chat.build(), files: Files.build(),
       face: isDoc ? FaceMesh.doctorPane() : FaceMesh.patientPane()
     };
-    if (isDoc) { R.cardBody = Record.cardPane(); content.card = R.cardBody; content.concl = Record.conclPane(); }
+    if (isDoc) { R.cardBody = Record.cardPane(); content.card = R.cardBody; content.concl = Record.conclPane(); content.tr = Transcript.build(); }
     for (const [k] of tabs) this.panes[k] = h('section', { class: 'pane', id: 'pane-' + k, role: 'tabpanel' }, k === 'card' ? null : content[k]);
     if (isDoc) this.panes.card.append(R.cardBody);
     R.tabs = h('div', { class: 'tabs', role: 'tablist' }, tabs.map(([k, label]) => { const b = h('button', { role: 'tab', 'aria-selected': 'false', onclick: () => this.showTab(k) }, label); this.tabBtn[k] = b; return b; }));
@@ -99,6 +99,7 @@ const CallUi = {
     if (Rtc.remote) this.setRemote(Rtc.remote);
     this.makeDraggable(R.self, R.wrap);
     this.shareChanged(false); this.syncBtns();
+    Speech.mount(R.vtop);
     FaceMesh.mount({ role: State.v.role, remote: R.remote, local: R.local, ovR: R.ovR, ovL: R.ovL, stage: R.stage, wrap: R.wrap, hint: R.hint, pq: R.pq });
     if (isDoc) { Files.history(); }
     if (this.timerFn) Loop.del(this.timerFn);
@@ -124,6 +125,7 @@ const CallUi = {
     R.layout.dataset.ptab = name; this.markPbar(name);
     if (R.layout.classList.contains('pat')) { if (window.matchMedia('(max-width:700px)').matches === false) { R.layout.classList.remove('noside'); if (R.bSide) R.bSide.setAttribute('aria-pressed', 'true'); } }
     if (name === 'chat') Chat.focusEnd();
+    if (name === 'tr') Transcript.load();
   },
   markPbar(n) { for (const b of this.r.pbar.querySelectorAll('button')) b.setAttribute('aria-selected', String(b.dataset.t === n)); },
   setRemote(stream) {
@@ -196,7 +198,8 @@ const CallUi = {
     const ao = h('button', { class: 'btn sec', onclick: () => { Media.setAudioOnly(Media.camOn); this.syncBtns(); ao.textContent = Media.camOn ? 'Включить режим «Только аудио»' : 'Выключить режим «Только аудио»'; } }, icon('audio'), Media.camOn ? 'Включить режим «Только аудио»' : 'Выключить режим «Только аудио»');
     const fs = h('button', { class: 'btn sec', onclick: () => { s.close(); this.fullscreen(); } }, icon('full'), 'Полный экран');
     const big = h('button', { class: 'btn sec', onclick: () => Ui.big() }, icon('text'), 'Крупный шрифт');
-    s.el.append(h('div', { class: 'stack' }, ao, fs, big));
+    const sp = State.v.role === 'doctor' ? h('button', { class: 'btn sec', onclick: () => { s.close(); Speech.request(); } }, icon('audio'), Speech.on ? 'Остановить расшифровку речи' : 'Включить расшифровку речи') : null;
+    s.el.append(h('div', { class: 'stack' }, ao, fs, big, sp));
   },
   fullscreen() {
     const el = this.r.wrap; if (!el) return;
@@ -247,11 +250,12 @@ const Events = {
       case 'restart_ice': if (doc) { Rtc.offer(true); } break;
       case 'reset_patient': break;
       case 'face_consent': if (doc) FaceMesh.setConsent(!!d.granted); break;
+      case 'speech_request': case 'speech_consent': case 'speech_stop': Speech.control(d); break;
       default: if (!doc) FaceMesh.patientRequest(d); break;
     }
   },
   ended() {
-    Rtc.close(); Quality.stop(); FaceMesh.stopAll(); Media.stop(); clearInterval(Session.hb);
+    Speech.stop(); Rtc.close(); Quality.stop(); FaceMesh.stopAll(); Media.stop(); clearInterval(Session.hb);
     State.set({ status: 'completed', rtc: 'closed' });
     if (CallUi.r.remote) { CallUi.r.remote.srcObject = null; CallUi.r.local.srcObject = null; }
     CallUi.refresh();
@@ -542,7 +546,7 @@ const App = {
   },
   teardown() {
     Poller.stop(); clearInterval(Session.hb); clearInterval(Appointments.timer);
-    Rtc.close(); Quality.stop(); FaceMesh.stopAll(); Media.stop(); Ui.closeAudio();
+    Speech.stop(); Rtc.close(); Quality.stop(); FaceMesh.stopAll(); Media.stop(); Ui.closeAudio();
     Api.room = null; Api.token = null; State.set({ view: '', rtc: 'idle', status: 'planned', peerHere: false, faceConsent: false });
     if (CallUi.timerFn) Loop.del(CallUi.timerFn);
     Header.update();
@@ -557,7 +561,7 @@ const App = {
     const doc = State.v.role === 'doctor';
     try { sessionStorage.removeItem('mars_pt_' + Session.code); } catch (e) { /* ignore */ }
     Poller.stop(); clearInterval(Session.hb); clearInterval(Appointments.timer);
-    Rtc.close(); Quality.stop(); FaceMesh.stopAll(); Media.stop(); Ui.closeAudio(); Ui.closeAll(); Loop.stop();
+    Speech.stop(); Rtc.close(); Quality.stop(); FaceMesh.stopAll(); Media.stop(); Ui.closeAudio(); Ui.closeAll(); Loop.stop();
     Api.room = null; Api.token = null; Chat.list = null; Files.box = null; CallUi.r = {};
     $('#printArea').replaceChildren();
     State.set({ view: 'killed', rtc: 'closed', status: 'completed', peerHere: false });
@@ -569,7 +573,7 @@ const App = {
   roomGone(e) {
     if (this.dead) return;
     if (e && e.status === 410) { this.killed(); return; }
-    Poller.stop(); clearInterval(Session.hb); Rtc.close(); Quality.stop(); FaceMesh.stopAll(); Media.stop();
+    Poller.stop(); clearInterval(Session.hb); Speech.stop(); Rtc.close(); Quality.stop(); FaceMesh.stopAll(); Media.stop();
     $('#main').replaceChildren(h('div', { class: 'center-col' }, h('h2', { text: 'Сеанс недоступен' }),
       h('p', { class: 'mut', text: 'Комната не найдена или доступ к ней потерян (возможно, сервер перезапущен).' }),
       h('button', { class: 'btn pri', onclick: () => { try { sessionStorage.removeItem('mars_pt_' + Session.code); } catch (x) { /* ignore */ } location.reload(); } }, 'Начать заново')));

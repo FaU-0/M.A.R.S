@@ -17,7 +17,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 BASE = 18000
-PORTS = {"gateway": BASE, "vision": BASE + 1, "reports": BASE + 2, "speech": BASE + 3, "assistant": BASE + 4}
+PORTS = {"gateway": BASE, "vision": BASE + 1, "reports": BASE + 2, "speech": BASE + 3, "assistant": BASE + 4, "database": BASE + 5}
 FAILS = []
 
 
@@ -49,18 +49,19 @@ def wait_status(want, timeout=40):
 
 def main():
     tmp = tempfile.mkdtemp(prefix="mars_t_")
-    env = dict(os.environ, DATA_DIR=tmp, PORT=str(BASE), AUTH_REQUIRED="True", ADMIN_PASSWORD="test-pass-1234")
+    env = dict(os.environ, DATA_DIR=tmp, PORT=str(BASE), AUTH_REQUIRED="True", ADMIN_PASSWORD="test-pass-1234",
+               MODELS_DIR=str(Path.home() / ".cache" / "mars_models"))  # speech грузит модель Whisper из общего кэша
     for n, p in PORTS.items():
         if n != "gateway":
             env["MARS_%s_PORT" % n.upper()] = str(p)
     p = subprocess.Popen([sys.executable, str(ROOT / "run_all.py")], env=env, cwd=str(ROOT),
                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     try:
-        st = wait_status("ok")
-        check(st and st["status"] == "ok" and len(st["services"]) == 4, "все 4 сервиса готовы, /status = ok")
+        st = wait_status("ok", 120)
+        check(st and st["status"] == "ok" and len(st["services"]) == 5, "все 5 вторичных сервисов готовы, /status = ok")
         s, _ = get("/health")
         check(s == 200, "gateway /health отвечает")
-        for n in ("vision", "reports", "speech", "assistant"):
+        for n in ("database", "vision", "reports", "speech", "assistant"):
             s, r = get("/ready", PORTS[n])
             check(s == 200 and r["ready"], "%s /ready" % n)
         # подпись: без неё вызов закрыт
@@ -77,7 +78,7 @@ def main():
         check(st_ == 200, "подписанный вызов проходит")
 
         # останавливаем каждый вторичный сервис: gateway жив, /status = degraded
-        for n in ("vision", "reports", "speech", "assistant"):
+        for n in ("database", "vision", "reports", "speech", "assistant"):
             pids = subprocess.run(["pgrep", "-f", "%s.main" % n], capture_output=True, text=True).stdout.split()
             for pid in pids:
                 os.kill(int(pid), signal.SIGSTOP)  # остановка без перезапуска run_all

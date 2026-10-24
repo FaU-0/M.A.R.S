@@ -1,0 +1,84 @@
+
+/* ===== Вкладка «Расшифровка» (только врач): обезличенный текст, правки замен, подтверждение для отчёта ===== */
+const Transcript = {
+  el: null, d: null, st: null, timer: null, busy: false,
+  ROLE: { doctor: 'Врач', patient: 'Пациент' },
+  TYPES: [['NAME', 'Имя'], ['ORG', 'Организация'], ['CITY', 'Место'], ['SCHOOL', 'Учебное заведение'], ['OTHER', 'Другое']],
+  build() { this.el = h('div', { class: 'stack' }); this.render(); return this.el; },
+  async load() {
+    if (!Api.room || State.v.role !== 'doctor') return;
+    try { const r = await Api.get('/rooms/' + Api.room + '/transcript'); this.d = r.deid; this.st = r.status; }
+    catch (e) { if (e.status !== 403) Toast.err(e); return; }
+    this.render();
+    clearTimeout(this.timer);
+    if (this.d && this.d.status === 'queued' && CallUi.curTab === 'tr') this.timer = setTimeout(() => this.load(), 4000);
+  },
+  async edit(body) {
+    if (this.busy) return; this.busy = true;
+    try { const r = await Api.post('/rooms/' + Api.room + '/transcript/edit', body); this.d = r.deid; this.render(); }
+    catch (e) { Toast.err(e); }
+    this.busy = false;
+  },
+  async redo() {
+    if (this.d && this.d.status === 'done' && !(await Ui.confirm('Обезличить повторно?', 'Расшифровка будет обезличена заново. Ваши ручные правки и подтверждение будут сброшены.', 'Обезличить'))) return;
+    try { const r = await Api.post('/rooms/' + Api.room + '/transcript/deidentify', {}); this.d = r.deid; this.render(); this.load(); }
+    catch (e) { Toast.err(e); }
+  },
+  async original() {
+    if (!(await Ui.confirm('Показать оригинал?', 'Исходная расшифровка содержит личные данные пациента. Просмотр записывается в журнал аудита.', 'Показать'))) return;
+    let r; try { r = await Api.get('/rooms/' + Api.room + '/transcript/original'); } catch (e) { Toast.err(e); return; }
+    const s = Ui.sheet({ title: 'Исходная расшифровка', wide: true });
+    s.el.append(h('div', { class: 'banner warn', style: 'border-radius:10px', text: 'Содержит личные данные. Не копируйте этот текст в отчёт.' }), this.list(r.segments, false));
+  },
+  addSheet() {
+    const sel = (window.getSelection && String(window.getSelection())).trim();
+    const inp = h('input', { class: 'inp', value: sel, maxlength: 200 });
+    const typ = h('select', { class: 'inp' }, this.TYPES.map(([v, l]) => h('option', { value: v, text: l })));
+    const s = Ui.sheet({ title: 'Добавить замену', actions: [{ label: 'Отмена', kind: 'sec' }, { label: 'Заменить везде', kind: 'pri', onClick: () => { if (inp.value.trim().length < 2) { Toast.show('Введите фрагмент'); return false; } this.edit({ op: 'add', text: inp.value.trim(), type: typ.value }); } }] });
+    s.el.append(h('p', { class: 'note', style: 'margin:0', text: 'Фрагмент будет скрыт меткой во всей расшифровке. Можно выделить его в тексте до нажатия кнопки.' }), Ui.field('Фрагмент', inp), Ui.field('Что это', typ));
+  },
+  /* текст с подсвеченными метками; клик по метке предлагает отменить замену */
+  textNode(text, editable) {
+    const out = [], rx = /\[[A-ZА-ЯЁ_0-9]+\]/g; let pos = 0, m;
+    while ((m = rx.exec(text))) {
+      if (m.index > pos) out.push(text.slice(pos, m.index));
+      const lab = m[0];
+      out.push(editable ? h('button', { class: 'chip b', style: 'border:0;cursor:pointer;margin:0 1px', title: 'Отменить замену', onclick: async () => { if (await Ui.confirm('Отменить замену ' + lab + '?', 'Под этой меткой во всей расшифровке будет показан исходный текст. Делайте это, только если это не личные данные (например, название лекарства).', 'Отменить замену')) this.edit({ op: 'undo', label: lab }); } }, lab)
+        : h('span', { class: 'chip b', style: 'margin:0 1px' }, lab));
+      pos = m.index + lab.length;
+    }
+    if (pos < text.length) out.push(text.slice(pos));
+    return out;
+  },
+  list(segs, editable) {
+    const t0 = segs.length ? segs[0].t : 0;
+    return h('div', { class: 'stack', style: 'gap:8px' }, segs.map(g => {
+      const s = Math.max(0, Math.round((g.t - t0) / 1000));
+      return h('div', null, h('div', { class: 'sm mut' }, (this.ROLE[g.role] || g.role) + ' · ' + pad2(Math.floor(s / 60)) + ':' + pad2(s % 60)),
+        h('p', { style: 'margin:0;line-height:1.6' }, this.textNode(g.text, editable)));
+    }));
+  },
+  render() {
+    const el = this.el; if (!el) return;
+    const d = this.d, st = this.st, kids = [];
+    if (!d) { el.replaceChildren(h('p', { class: 'mut', text: 'Загрузка...' })); return; }
+    const live = st && st.chunks ? 'Кусков записи: ' + st.chunks + ', расшифровано: ' + st.done + (st.queued ? ', в очереди: ' + st.queued : '') + '.' : '';
+    if (d.status === 'none') kids.push(h('p', { style: 'margin:0', text: 'Обезличенной расшифровки пока нет. Она появится после завершения приёма, если пациент дал согласие на расшифровку речи.' }), live ? h('p', { class: 'note', style: 'margin:0', text: live }) : null);
+    if (d.status === 'queued') kids.push(h('div', { class: 'banner', style: 'border-radius:10px', role: 'status', text: d.waiting ? 'Сервис обезличивания временно недоступен. Расшифровка сохранена и будет обезличена, когда сервис заработает.' : 'Идёт обезличивание расшифровки. На процессоре это может занять несколько минут.' }));
+    if (d.status === 'error') kids.push(h('div', { class: 'banner bad', style: 'border-radius:10px', text: 'Не удалось обезличить: ' + ((d.error && d.error.message) || 'ошибка') + '.' }));
+    const btns = [];
+    if (d.status === 'done') {
+      kids.push(h('div', { class: 'row wrap', style: 'gap:8px' }, d.confirmed ? h('span', { class: 'chip g', text: 'Проверено врачом, идёт в отчёт' }) : h('span', { class: 'chip o', text: 'Не проверено: в отчёт не попадает' }),
+        h('span', { class: 'sm mut', text: 'Замен: ' + (d.replacements || []).length + (d.model ? ' · ' + d.model : '') })));
+      kids.push(h('p', { class: 'note', style: 'margin:0', text: 'Проверьте текст: нейросеть может пропустить имя или название. Синие метки скрывают личные данные; нажмите на метку, чтобы отменить замену.' }));
+      if (d.editable) btns.push(h('button', { class: 'btn sec', onclick: () => this.addSheet() }, 'Добавить замену'));
+      btns.push(h('button', { class: 'btn ' + (d.confirmed ? 'sec' : 'pri'), onclick: () => this.edit({ op: d.confirmed ? 'unconfirm' : 'confirm' }) }, d.confirmed ? 'Снять подтверждение' : 'Подтвердить для отчёта'));
+    }
+    if (d.status !== 'none' || (st && st.chunks)) btns.push(h('button', { class: 'btn sec', onclick: () => this.original() }, 'Показать оригинал'));
+    if (d.status === 'done' || d.status === 'error' || (d.status === 'none' && st && st.chunks)) btns.push(h('button', { class: 'btn sec', onclick: () => this.redo() }, d.status === 'none' ? 'Обезличить сейчас' : 'Обезличить повторно'));
+    if (btns.length) kids.push(h('div', { class: 'row wrap' }, btns));
+    if (d.segments && d.segments.length) kids.push(this.list(d.segments, d.status === 'done' && d.editable));
+    else if (d.status === 'done') kids.push(h('p', { class: 'mut', text: 'В записи не найдено речи.' }));
+    el.replaceChildren(...kids.filter(Boolean));
+  }
+};
