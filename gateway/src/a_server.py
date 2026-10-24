@@ -224,6 +224,11 @@ CREATE TABLE IF NOT EXISTS measurements(id INTEGER PRIMARY KEY, appt_id INTEGER 
   kind TEXT NOT NULL, ts INTEGER NOT NULL, body TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS audit(id INTEGER PRIMARY KEY, ts INTEGER NOT NULL, actor TEXT NOT NULL,
   action TEXT NOT NULL, room TEXT DEFAULT '', detail TEXT DEFAULT '');
+CREATE TABLE IF NOT EXISTS jobs(id INTEGER PRIMARY KEY, appt_id INTEGER NOT NULL, kind TEXT NOT NULL,
+  key TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'queued', attempts INTEGER NOT NULL DEFAULT 0,
+  next_try INTEGER NOT NULL DEFAULT 0, created INTEGER NOT NULL, updated INTEGER NOT NULL,
+  input TEXT NOT NULL, result TEXT, error TEXT, UNIQUE(appt_id, key));
+CREATE INDEX IF NOT EXISTS ix_jobs_queue ON jobs(status, next_try);
 CREATE INDEX IF NOT EXISTS ix_photos_patient ON photos(patient_id, pose, ts);
 CREATE INDEX IF NOT EXISTS ix_meas_patient ON measurements(patient_id, ts);
 """
@@ -410,6 +415,7 @@ def cleanup_loop(stop_evt):
                 for code in [c for c, r in ROOMS.items() if t - r.last > ROOM_TTL]:
                     del ROOMS[code]
             DB.run("DELETE FROM sessions WHERE expires<?", (now(),))
+            DB.run("DELETE FROM jobs WHERE created<?", (now() - JOB_KEEP,))
         except Exception:
             log.exception("cleanup")
 
@@ -757,6 +763,12 @@ class Handler(BaseHTTPRequestHandler):
             }
             if key in table:
                 return table[key](code)
+        m = re.fullmatch(r"/rooms/([A-Za-z0-9]{4,12})/analyze", path)
+        if method == "POST" and m:
+            return self.h_analyze(m.group(1))
+        m = re.fullmatch(r"/rooms/([A-Za-z0-9]{4,12})/jobs/(\d+)", path)
+        if method == "GET" and m:
+            return self.h_job_get(m.group(1), int(m.group(2)))
         m = re.fullmatch(r"/rooms/([A-Za-z0-9]{4,12})/files/(\d+)", path)
         if method == "GET" and m:
             return self.h_file_get(m.group(1), int(m.group(2)))
@@ -1283,6 +1295,40 @@ class Handler(BaseHTTPRequestHandler):
             return self.send_json(502, {"error": "bad_gateway", "service": "reports", "message": "Некорректный ответ сервиса отчётов"})
         self.send_json(200, {"html": data["html"]})
 
+    # --- анализ лица (сервис vision, через очередь заданий) ---
+    def h_analyze(self, code):
+        """Ставит расчёт в очередь и отвечает 202 с номером задания. Повтор с тем же key не создаёт дубля.
+        Без сервиса vision (одиночный режим) сразу 503: браузер считает сам."""
+        room, role = self.need_room(code)
+        if not room.bucket(role, "main").take(1):
+            raise ApiError(429, "rate_limited", "Слишком много запросов")
+        b = self.read_json(4 * 1024 * 1024)
+        kind = clean_text(b.get("kind"), 20)
+        if kind not in VISION_KINDS:
+            raise ApiError(400, "bad_kind", "Неизвестный вид анализа")
+        key = clean_text(b.get("key"), 64)
+        if not re.fullmatch(r"[A-Za-z0-9_-]{8,64}", key or ""):
+            raise ApiError(400, "bad_key", "Нужен ключ задания (8-64 символа)")
+        if not isinstance(b.get("input"), dict):
+            raise ApiError(400, "bad_input", "Нет данных для анализа")
+        if not vision_enabled():
+            return self.send_json(503, {"error": "service_unavailable", "service": "vision", "degraded": True,
+                                        "message": "Сервис анализа не подключён"}, {"Retry-After": "30"})
+        appt = appt_by_room(room)
+        t = now()
+        DB.run("INSERT OR IGNORE INTO jobs(appt_id,kind,key,created,updated,input) VALUES(?,?,?,?,?,?)",
+               (appt["id"], kind, key, t, t, json.dumps(b["input"], ensure_ascii=False)))
+        job = DB.one("SELECT * FROM jobs WHERE appt_id=? AND key=?", (appt["id"], key))
+        JOBS_EVT.set()
+        self.send_json(202, job_view(job))
+
+    def h_job_get(self, code, jid):
+        room, role = self.need_room(code)
+        job = DB.one("SELECT * FROM jobs WHERE id=? AND appt_id=?", (jid, appt_by_room(room)["id"]))
+        if not job:
+            raise ApiError(404, "not_found", "Задание не найдено")
+        self.send_json(200, job_view(job))
+
     def h_protocol_get(self, code):
         room, role = self.need_room(code)
         appt = appt_by_room(room)
@@ -1387,6 +1433,67 @@ def services_status():
     return res
 
 
+# Очередь заданий для vision: задания переживают перезапуск, повторы с нарастающей паузой
+VISION_KINDS = ("symmetry", "mobility", "compare", "calibrate")
+JOBS_EVT = threading.Event()
+JOB_MAX_ATTEMPTS = 20
+JOB_KEEP = 86400  # входные данные (точки лица) хранятся сутки
+
+
+def vision_enabled():
+    return _ServiceClient is not None and _svc_config is not None and "vision" in _svc_config.monitored_services()
+
+
+def job_view(job):
+    out = {"id": job["id"], "kind": job["kind"], "status": job["status"], "attempts": job["attempts"],
+           "created": job["created"], "updated": job["updated"]}
+    if job["status"] == "done" and job["result"]:
+        out["result"] = json.loads(job["result"])
+    if job["error"]:
+        out["error"] = json.loads(job["error"])
+    if job["status"] == "queued" and job["attempts"]:
+        out["retry_at"] = job["next_try"]
+    return out
+
+
+def run_job(job):
+    cli = _SVC_CLIENTS.get("vision") or _SVC_CLIENTS.setdefault("vision", _ServiceClient("vision", probe_every=5.0))
+    t = now()
+    try:
+        st, data = cli.call("POST", "/v1/" + job["kind"], json.loads(job["input"]), timeout=10.0, request_id="job%d" % job["id"])
+    except Exception as e:  # noqa: BLE001  (ServiceUnavailable и сбои сети: повторим позже)
+        n = job["attempts"] + 1
+        err = json.dumps({"error": "service_unavailable", "service": "vision", "message": "Сервис анализа временно недоступен"}, ensure_ascii=False)
+        if n >= JOB_MAX_ATTEMPTS:
+            DB.run("UPDATE jobs SET status='error', attempts=?, updated=?, error=? WHERE id=?", (n, t, err, job["id"]))
+        else:
+            DB.run("UPDATE jobs SET attempts=?, next_try=?, updated=?, error=? WHERE id=?",
+                   (n, t + min(60, 2 ** n), t, err, job["id"]))
+        log.info("задание %d: vision недоступен (%s), попытка %d", job["id"], e, n)
+        return False
+    if st == 200 and isinstance(data, dict):
+        DB.run("UPDATE jobs SET status='done', updated=?, result=?, error=NULL WHERE id=?",
+               (t, json.dumps(data, ensure_ascii=False), job["id"]))
+    else:
+        err = data if isinstance(data, dict) else {"error": "bad_response", "service": "vision", "message": "HTTP %d" % st}
+        DB.run("UPDATE jobs SET status='error', updated=?, error=? WHERE id=?", (t, json.dumps(err, ensure_ascii=False), job["id"]))
+    return True
+
+
+def jobs_loop(stop_evt):
+    while not stop_evt.is_set():
+        JOBS_EVT.wait(1.0)
+        JOBS_EVT.clear()
+        if not vision_enabled():
+            continue
+        try:
+            for job in DB.q("SELECT * FROM jobs WHERE status='queued' AND next_try<=? ORDER BY id LIMIT 10", (now(),)):
+                if stop_evt.is_set() or not run_job(job):
+                    break  # сервис недоступен: остальные ждут своей очереди
+        except Exception:
+            log.exception("очередь заданий")
+
+
 class Srv(ThreadingHTTPServer):
     daemon_threads = True
     allow_reuse_address = True
@@ -1447,6 +1554,7 @@ def main():
     rt = Runtime(httpd, DB, stop_evt, COND)
     _MARS_RUNNING = rt
     threading.Thread(target=cleanup_loop, args=(stop_evt,), daemon=True).start()
+    threading.Thread(target=jobs_loop, args=(stop_evt,), daemon=True).start()
     scheme = "https" if SECURE else "http"
     print("M.A.R.S.: %s://localhost:%d  (центр: %s)" % (scheme, PORT, CENTER_NAME))
     if not SECURE:

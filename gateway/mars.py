@@ -224,6 +224,11 @@ CREATE TABLE IF NOT EXISTS measurements(id INTEGER PRIMARY KEY, appt_id INTEGER 
   kind TEXT NOT NULL, ts INTEGER NOT NULL, body TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS audit(id INTEGER PRIMARY KEY, ts INTEGER NOT NULL, actor TEXT NOT NULL,
   action TEXT NOT NULL, room TEXT DEFAULT '', detail TEXT DEFAULT '');
+CREATE TABLE IF NOT EXISTS jobs(id INTEGER PRIMARY KEY, appt_id INTEGER NOT NULL, kind TEXT NOT NULL,
+  key TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'queued', attempts INTEGER NOT NULL DEFAULT 0,
+  next_try INTEGER NOT NULL DEFAULT 0, created INTEGER NOT NULL, updated INTEGER NOT NULL,
+  input TEXT NOT NULL, result TEXT, error TEXT, UNIQUE(appt_id, key));
+CREATE INDEX IF NOT EXISTS ix_jobs_queue ON jobs(status, next_try);
 CREATE INDEX IF NOT EXISTS ix_photos_patient ON photos(patient_id, pose, ts);
 CREATE INDEX IF NOT EXISTS ix_meas_patient ON measurements(patient_id, ts);
 """
@@ -410,6 +415,7 @@ def cleanup_loop(stop_evt):
                 for code in [c for c, r in ROOMS.items() if t - r.last > ROOM_TTL]:
                     del ROOMS[code]
             DB.run("DELETE FROM sessions WHERE expires<?", (now(),))
+            DB.run("DELETE FROM jobs WHERE created<?", (now() - JOB_KEEP,))
         except Exception:
             log.exception("cleanup")
 
@@ -757,6 +763,12 @@ class Handler(BaseHTTPRequestHandler):
             }
             if key in table:
                 return table[key](code)
+        m = re.fullmatch(r"/rooms/([A-Za-z0-9]{4,12})/analyze", path)
+        if method == "POST" and m:
+            return self.h_analyze(m.group(1))
+        m = re.fullmatch(r"/rooms/([A-Za-z0-9]{4,12})/jobs/(\d+)", path)
+        if method == "GET" and m:
+            return self.h_job_get(m.group(1), int(m.group(2)))
         m = re.fullmatch(r"/rooms/([A-Za-z0-9]{4,12})/files/(\d+)", path)
         if method == "GET" and m:
             return self.h_file_get(m.group(1), int(m.group(2)))
@@ -1283,6 +1295,40 @@ class Handler(BaseHTTPRequestHandler):
             return self.send_json(502, {"error": "bad_gateway", "service": "reports", "message": "Некорректный ответ сервиса отчётов"})
         self.send_json(200, {"html": data["html"]})
 
+    # --- анализ лица (сервис vision, через очередь заданий) ---
+    def h_analyze(self, code):
+        """Ставит расчёт в очередь и отвечает 202 с номером задания. Повтор с тем же key не создаёт дубля.
+        Без сервиса vision (одиночный режим) сразу 503: браузер считает сам."""
+        room, role = self.need_room(code)
+        if not room.bucket(role, "main").take(1):
+            raise ApiError(429, "rate_limited", "Слишком много запросов")
+        b = self.read_json(4 * 1024 * 1024)
+        kind = clean_text(b.get("kind"), 20)
+        if kind not in VISION_KINDS:
+            raise ApiError(400, "bad_kind", "Неизвестный вид анализа")
+        key = clean_text(b.get("key"), 64)
+        if not re.fullmatch(r"[A-Za-z0-9_-]{8,64}", key or ""):
+            raise ApiError(400, "bad_key", "Нужен ключ задания (8-64 символа)")
+        if not isinstance(b.get("input"), dict):
+            raise ApiError(400, "bad_input", "Нет данных для анализа")
+        if not vision_enabled():
+            return self.send_json(503, {"error": "service_unavailable", "service": "vision", "degraded": True,
+                                        "message": "Сервис анализа не подключён"}, {"Retry-After": "30"})
+        appt = appt_by_room(room)
+        t = now()
+        DB.run("INSERT OR IGNORE INTO jobs(appt_id,kind,key,created,updated,input) VALUES(?,?,?,?,?,?)",
+               (appt["id"], kind, key, t, t, json.dumps(b["input"], ensure_ascii=False)))
+        job = DB.one("SELECT * FROM jobs WHERE appt_id=? AND key=?", (appt["id"], key))
+        JOBS_EVT.set()
+        self.send_json(202, job_view(job))
+
+    def h_job_get(self, code, jid):
+        room, role = self.need_room(code)
+        job = DB.one("SELECT * FROM jobs WHERE id=? AND appt_id=?", (jid, appt_by_room(room)["id"]))
+        if not job:
+            raise ApiError(404, "not_found", "Задание не найдено")
+        self.send_json(200, job_view(job))
+
     def h_protocol_get(self, code):
         room, role = self.need_room(code)
         appt = appt_by_room(room)
@@ -1387,6 +1433,67 @@ def services_status():
     return res
 
 
+# Очередь заданий для vision: задания переживают перезапуск, повторы с нарастающей паузой
+VISION_KINDS = ("symmetry", "mobility", "compare", "calibrate")
+JOBS_EVT = threading.Event()
+JOB_MAX_ATTEMPTS = 20
+JOB_KEEP = 86400  # входные данные (точки лица) хранятся сутки
+
+
+def vision_enabled():
+    return _ServiceClient is not None and _svc_config is not None and "vision" in _svc_config.monitored_services()
+
+
+def job_view(job):
+    out = {"id": job["id"], "kind": job["kind"], "status": job["status"], "attempts": job["attempts"],
+           "created": job["created"], "updated": job["updated"]}
+    if job["status"] == "done" and job["result"]:
+        out["result"] = json.loads(job["result"])
+    if job["error"]:
+        out["error"] = json.loads(job["error"])
+    if job["status"] == "queued" and job["attempts"]:
+        out["retry_at"] = job["next_try"]
+    return out
+
+
+def run_job(job):
+    cli = _SVC_CLIENTS.get("vision") or _SVC_CLIENTS.setdefault("vision", _ServiceClient("vision", probe_every=5.0))
+    t = now()
+    try:
+        st, data = cli.call("POST", "/v1/" + job["kind"], json.loads(job["input"]), timeout=10.0, request_id="job%d" % job["id"])
+    except Exception as e:  # noqa: BLE001  (ServiceUnavailable и сбои сети: повторим позже)
+        n = job["attempts"] + 1
+        err = json.dumps({"error": "service_unavailable", "service": "vision", "message": "Сервис анализа временно недоступен"}, ensure_ascii=False)
+        if n >= JOB_MAX_ATTEMPTS:
+            DB.run("UPDATE jobs SET status='error', attempts=?, updated=?, error=? WHERE id=?", (n, t, err, job["id"]))
+        else:
+            DB.run("UPDATE jobs SET attempts=?, next_try=?, updated=?, error=? WHERE id=?",
+                   (n, t + min(60, 2 ** n), t, err, job["id"]))
+        log.info("задание %d: vision недоступен (%s), попытка %d", job["id"], e, n)
+        return False
+    if st == 200 and isinstance(data, dict):
+        DB.run("UPDATE jobs SET status='done', updated=?, result=?, error=NULL WHERE id=?",
+               (t, json.dumps(data, ensure_ascii=False), job["id"]))
+    else:
+        err = data if isinstance(data, dict) else {"error": "bad_response", "service": "vision", "message": "HTTP %d" % st}
+        DB.run("UPDATE jobs SET status='error', updated=?, error=? WHERE id=?", (t, json.dumps(err, ensure_ascii=False), job["id"]))
+    return True
+
+
+def jobs_loop(stop_evt):
+    while not stop_evt.is_set():
+        JOBS_EVT.wait(1.0)
+        JOBS_EVT.clear()
+        if not vision_enabled():
+            continue
+        try:
+            for job in DB.q("SELECT * FROM jobs WHERE status='queued' AND next_try<=? ORDER BY id LIMIT 10", (now(),)):
+                if stop_evt.is_set() or not run_job(job):
+                    break  # сервис недоступен: остальные ждут своей очереди
+        except Exception:
+            log.exception("очередь заданий")
+
+
 class Srv(ThreadingHTTPServer):
     daemon_threads = True
     allow_reuse_address = True
@@ -1447,6 +1554,7 @@ def main():
     rt = Runtime(httpd, DB, stop_evt, COND)
     _MARS_RUNNING = rt
     threading.Thread(target=cleanup_loop, args=(stop_evt,), daemon=True).start()
+    threading.Thread(target=jobs_loop, args=(stop_evt,), daemon=True).start()
     scheme = "https" if SECURE else "http"
     print("M.A.R.S.: %s://localhost:%d  (центр: %s)" % (scheme, PORT, CENTER_NAME))
     if not SECURE:
@@ -2935,7 +3043,43 @@ const deg = r => r * 180 / Math.PI;
 const FaceMesh = {
   role: null, consent: false, mode: 'off', coach: false, autocrop: false, secondary: false, tol: 5, poses: ['frontal', 'left45', 'right45', 'left90', 'right90'],
   trk: null, trk2: null, els: {}, cal: null, latest: {}, info: null, unavailable: '', busy: 0, subs: new Set(), lastAssess: 0, lastSend: 0, motion: [], timers: [], photos: [], dpr: 1, sizes: new Map(), accent: '#007AFF', accT: 0,
-  Loader: {}, Overlay: {}, Pose: {}, Symmetry: {}, Mobility: {}, Capture: {}, Compare: {}, Calibrate: {}, Privacy: {}, Report: {}
+  Loader: {}, Overlay: {}, Pose: {}, Symmetry: {}, Mobility: {}, Capture: {}, Compare: {}, Calibrate: {}, Privacy: {}, Report: {}, Remote: {}
+};
+
+/* --- Remote: расчёт метрик в сервисе vision через очередь заданий gateway.
+   Если сервис недоступен или не успел ответить, используется расчёт на устройстве. --- */
+FaceMesh.Remote = {
+  WAIT: 6000, down: false,
+  /* компактный кадр: только нужные точки и коэффициенты */
+  pack(cur, idx, names) {
+    const lm = {}, bs = {};
+    if (idx) for (const i of idx) { const p = cur.lm[i]; if (p) lm[i] = [p.x, p.y, p.z]; }
+    if (cur.bs) for (const c of cur.bs) if (!names || names.includes(c.categoryName)) bs[c.categoryName] = c.score;
+    return { lm, mat: cur.mat ? Array.from(cur.mat) : null, bs, vw: cur.vw, vh: cur.vh, multi: !!cur.multi };
+  },
+  key() { return crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36) + Math.random().toString(36).slice(2, 12); },
+  /* результат vision или null; ошибка расчёта (например, мало кадров) пробрасывается */
+  async run(kind, input, signal) {
+    if (!Api.room) return null;
+    let job;
+    try { job = await Api.post('/rooms/' + Api.room + '/analyze', { kind, key: this.key(), input }, { signal }); }
+    catch (e) { if (e && e.name === 'AbortError') throw e; if (!(e && e.status === 503)) console.warn('vision', e); return null; }
+    const t0 = performance.now();
+    while (job.status === 'queued' || job.status === 'running') {
+      if (performance.now() - t0 > this.WAIT) return null;
+      await new Promise(r => setTimeout(r, 400));
+      job = await Api.get('/rooms/' + Api.room + '/jobs/' + job.id, { signal }).catch(e => { if (e && e.name === 'AbortError') throw e; return job; });
+    }
+    if (job.status === 'done') return job.result;
+    throw new Error((job.error && job.error.message) || 'Ошибка анализа');
+  },
+  async pick(kind, input, local, signal, downMsg) {
+    const r = await this.run(kind, input, signal);
+    if (r) { this.down = false; r.source = 'vision'; return r; }
+    if (!this.down) Toast.show(downMsg || 'Сервис анализа временно недоступен: расчёт выполнен на этом устройстве');
+    this.down = true; local.source = 'device';
+    return local;
+  }
 };
 
 /* --- Loader: локальные файлы MediaPipe с /vendor --- */
@@ -3193,18 +3337,19 @@ FaceMesh.Symmetry = {
     const F = FaceMesh, trk = F.trk, secs = 2.5, need = 12;
     return new Promise((res, rej) => {
       if (!trk) return rej(new Error('Модуль не запущен'));
-      const S = []; let t0 = 0, fail = null; const t00 = performance.now();
+      const S = [], FR = []; let t0 = 0, fail = null; const t00 = performance.now();
       const fn = cur => {
         if (signal && signal.aborted) { done(new Error('Отменено')); return; }
         const e = F.Pose.euler(cur);
-        if (!F.Pose.inTol(e, F.tol) || cur.multi && false) { t0 = 0; S.length = 0; onProgress(0, 'Выровняйте голову: ' + (e ? 'yaw ' + e.yaw.toFixed(0) + ', pitch ' + e.pitch.toFixed(0) + ', roll ' + e.roll.toFixed(0) : '')); return; }
+        if (!F.Pose.inTol(e, F.tol) || cur.multi && false) { t0 = 0; S.length = 0; FR.length = 0; onProgress(0, 'Выровняйте голову: ' + (e ? 'yaw ' + e.yaw.toFixed(0) + ', pitch ' + e.pitch.toFixed(0) + ', roll ' + e.roll.toFixed(0) : '')); return; }
         if (!t0) t0 = performance.now();
-        const v = this.one(cur); if (v) S.push(v);
+        const v = this.one(cur); if (v) { S.push(v); FR.push(F.Remote.pack(cur, this.IDX, [])); }
         const p = Math.min(1, (performance.now() - t0) / (secs * 1000)); onProgress(p, 'Держите позу');
-        if (p >= 1) { if (S.length >= need) done(null); else { t0 = 0; S.length = 0; } }
+        if (p >= 1) { if (S.length >= need) done(null); else { t0 = 0; S.length = 0; FR.length = 0; } }
       };
-      const tm = setInterval(() => { if (performance.now() - t00 > 25000) done(new Error('Не удалось получить устойчивую позу в допуске за отведённое время')); else if (trk.lost()) { t0 = 0; S.length = 0; onProgress(0, 'Лицо не найдено'); } }, 400);
-      const done = err => { clearInterval(tm); F.subs.delete(fn); if (err) rej(err); else res(this.build(S, F.cal)); };
+      const tm = setInterval(() => { if (performance.now() - t00 > 25000) done(new Error('Не удалось получить устойчивую позу в допуске за отведённое время')); else if (trk.lost()) { t0 = 0; S.length = 0; FR.length = 0; onProgress(0, 'Лицо не найдено'); } }, 400);
+      /* кадры для сервиса vision: неперечисляемое поле, в протокол не попадает */
+      const done = err => { clearInterval(tm); F.subs.delete(fn); if (err) return rej(err); const out = this.build(S, F.cal); Object.defineProperty(out, '_frames', { value: FR }); res(out); };
       F.subs.add(fn);
     });
   }
@@ -3226,9 +3371,10 @@ FaceMesh.Mobility = {
     const F = FaceMesh, secs = 4, tol = Math.max(F.tol * 2, 10);
     return new Promise((res, rej) => {
       if (!F.trk) return rej(new Error('Модуль не запущен'));
-      const t0 = performance.now(); let mr = 0, ml = 0, ms = 0, n = 0;
+      const t0 = performance.now(), FR = [], names = task.single ? [task.single] : [task.r, task.l]; let mr = 0, ml = 0, ms = 0, n = 0;
       const fn = cur => {
         if (signal && signal.aborted) { fin(new Error('Отменено')); return; }
+        if (FR.length < 400) FR.push(F.Remote.pack(cur, [LM.REO, LM.LEO, LM.NOSE], names));
         const e = F.Pose.euler(cur);
         if (!F.Pose.inTol(e, tol)) { onProgress((performance.now() - t0) / (secs * 1000), 'Смотрите в камеру'); return; }
         n++;
@@ -3242,6 +3388,7 @@ FaceMesh.Mobility = {
         if (n < 10) return rej(new Error('Недостаточно кадров с лицом в допустимой позе. Повторите задание.'));
         const o = { id: task.id, label: task.label };
         if (task.single) o.single = ms; else { o.right = mr; o.left = ml; o.ratio = Math.max(mr, ml) > 0.05 ? Math.min(mr, ml) / Math.max(mr, ml) : null; }
+        Object.defineProperty(o, '_frames', { value: FR });
         res(o);
       };
       F.subs.add(fn);
@@ -3464,7 +3611,7 @@ Object.assign(FaceMesh, {
   symTable(p, forPrint) {
     const k = p.calibration && p.calibration.ipd_mm, rows = p.rows || [];
     const unit = k ? ' (МЗР / мм)' : ' (доли МЗР)';
-    const src = k ? ' Источник масштаба: ' + p.calibration.label + '.' : ' Калибровки нет: значения в мм не показываются.';
+    const src = (k ? ' Источник масштаба: ' + p.calibration.label + '.' : ' Калибровки нет: значения в мм не показываются.') + (p.source === 'device' ? ' Рассчитано на устройстве.' : p.source === 'vision' ? ' Рассчитано сервисом анализа.' : '');
     return h('div', { class: 'stack' },
       h('table', { class: 'tb' }, h('tr', null, h('th', { text: 'Метрика' + unit }), h('th', { class: 'n', text: 'Правая' }), h('th', { class: 'n', text: 'Левая' }), h('th', { class: 'n', text: 'Разность' })),
         rows.map(r => h('tr', null, h('td', { text: r.label }), h('td', { class: 'n', text: fx(r.right) + (k ? ' / ' + fx(r.right_mm, 1) : '') }), h('td', { class: 'n', text: fx(r.left) + (k ? ' / ' + fx(r.left_mm, 1) : '') }), h('td', { class: 'n', text: fx(r.diff) + (k ? ' / ' + fx(r.diff_mm, 1) : '') })))),
@@ -3502,7 +3649,10 @@ Object.assign(FaceMesh, {
     const go = async () => {
       T.body.replaceChildren();
       try {
-        const res = await this.Symmetry.run((p, msg) => { T.prog.value = p; T.hint.textContent = (this.trk && this.trk.lost()) ? 'Лицо не найдено' : msg; }, T.signal);
+        const loc = await this.Symmetry.run((p, msg) => { T.prog.value = p; T.hint.textContent = (this.trk && this.trk.lost()) ? 'Лицо не найдено' : msg; }, T.signal);
+        if (T.isClosed()) return;
+        T.hint.textContent = 'Расчёт...';
+        const res = await this.Remote.pick('symmetry', { frames: loc._frames, tolerance: this.tol, calibration: this.cal }, loc, T.signal);
         if (T.isClosed()) return;
         T.hint.textContent = 'Готово'; T.prog.value = 1;
         T.body.replaceChildren(this.symTable(res), h('div', { class: 'row wrap' },
@@ -3516,16 +3666,21 @@ Object.assign(FaceMesh, {
     if (!(await this.ensureConsent())) return;
     this.busy++; await this.sync(); if (!this.trk) { this.busy--; return; }
     const T = this.taskSheet('Подвижность лица'), out = [];
+    const finish = async () => {
+      const loc = { kind: 'mobility', pose_ok: true, tolerance: Math.max(this.tol * 2, 10), tasks: out.slice(), ts: Math.floor(Date.now() / 1000) };
+      T.hint.textContent = 'Расчёт...'; T.body.replaceChildren();
+      let res;
+      try { res = await this.Remote.pick('mobility', { tasks: out.map(t => ({ id: t.id, frames: t._frames })), tolerance: this.tol }, loc, T.signal); }
+      catch (e) { if (T.isClosed()) return; T.hint.textContent = ''; T.body.replaceChildren(h('p', { text: e.message }), h('button', { class: 'btn pri', onclick: () => { out.length = 0; next(0); } }, 'Пройти заново')); return; }
+      if (T.isClosed()) return;
+      T.hint.textContent = 'Готово'; T.prog.value = 1;
+      T.body.replaceChildren(this.mobTable(res), h('div', { class: 'row wrap' },
+        h('button', { class: 'btn pri', onclick: async e => { e.target.disabled = true; if (await this.sendResult(res)) T.s.close(); else e.target.disabled = false; } }, 'Отправить врачу'),
+        h('button', { class: 'btn sec', onclick: () => { out.length = 0; next(0); } }, 'Пройти заново')));
+    };
     const next = i => {
       if (T.isClosed()) return;
-      if (i >= this.Mobility.TASKS.length) {
-        const res = { kind: 'mobility', pose_ok: true, tolerance: Math.max(this.tol * 2, 10), tasks: out, ts: Math.floor(Date.now() / 1000) };
-        T.hint.textContent = 'Готово'; T.prog.value = 1;
-        T.body.replaceChildren(this.mobTable(res), h('div', { class: 'row wrap' },
-          h('button', { class: 'btn pri', onclick: async e => { e.target.disabled = true; if (await this.sendResult(res)) T.s.close(); else e.target.disabled = false; } }, 'Отправить врачу'),
-          h('button', { class: 'btn sec', onclick: () => { out.length = 0; next(0); } }, 'Пройти заново')));
-        return;
-      }
+      if (i >= this.Mobility.TASKS.length) return finish();
       const task = this.Mobility.TASKS[i];
       T.prog.value = 0; T.hint.textContent = task.label + '. Нажмите «Начать»';
       T.body.replaceChildren(h('button', { class: 'btn pri lg', onclick: async () => {
@@ -4000,18 +4155,20 @@ FaceMesh.Compare = {
       try { this.l.close(); } catch (e) { /* ignore */ } this.l = null;
       if (closed) return;
       if (!A || !B) { body.replaceChildren(h('p', { text: 'Лицо не найдено на ' + (!A && !B ? 'обоих снимках' : (!A ? 'снимке «до»' : 'снимке «после»')) + '. Если снимок был сохранён со скрытым лицом, сравнить его нельзя.' })); return; }
-      this.show(body, s, ia, ib, A, B, before, after, pose);
+      const loc = this.calc(A, B, pose, F.tol, F.cal), side = (X, p) => ({ id: p.id, ts: p.ts, frame: F.Remote.pack(X, this.IDX, []) });
+      const R = await F.Remote.pick('compare', { before: side(A, before), after: side(B, after), pose, tolerance: F.tol, calibration: F.cal }, loc, null,
+        'Анализ временно недоступен, снимок сохранён и будет обработан позже. Сейчас показан расчёт на этом устройстве');
+      if (closed) return;
+      this.show(body, s, ia, ib, R, before, after, pose);
     } catch (e) { console.error(e); if (!closed) body.replaceChildren(h('p', { text: 'Не удалось выполнить сравнение: ' + ((e && e.message) || 'ошибка') })); }
   },
-  show(body, sheet, ia, ib, A, B, before, after, pose) {
-    const F = FaceMesh, tgt = POSE_YAW[pose], tol = F.tol, mm = pose === 'frontal' && F.cal && F.cal.ipd_mm ? F.cal : null;
+  IDX: [33, 133, 362, 263, 6, 1, 168, 10, 105, 334, 61, 291, 152, 468, 473],
+  /* расчёт сравнения по точкам двух снимков; тот же результат отдаёт сервис vision (/v1/compare) */
+  calc(A, B, pose, tol, cal) {
+    const F = FaceMesh, tgt = POSE_YAW[pose], mm = pose === 'frontal' && cal && cal.ipd_mm ? cal : null;
     const chk = X => { const e = F.Pose.euler(X); if (!e) return { ok: false, e: null }; const dy = pose === 'frontal' ? Math.abs(e.yaw) : Math.abs(Math.abs(e.yaw) - Math.abs(tgt)); return { ok: dy <= tol && Math.abs(e.pitch) <= tol && Math.abs(e.roll) <= tol, e }; };
     const ca = chk(A), cb = chk(B), poseOk = ca.ok && cb.ok && !!A.mat && !!B.mat;
     const T = this.procrustes(A, B);
-    const W = ia.naturalWidth, H = ia.naturalHeight;
-    const cv = document.createElement('canvas'); cv.width = W; cv.height = H; cv.setAttribute('aria-label', 'Сравнение снимков до и после');
-    const ctx = cv.getContext('2d');
-    const st = { mode: 'wipe', pos: 50, arrows: true };
     /* нормировка: по МЗР для анфаса, по высоте лица для остальных ракурсов */
     const dist = (X, i, j) => Math.hypot((X.lm[i].x - X.lm[j].x) * X.vw, (X.lm[i].y - X.lm[j].y) * X.vh);
     const normName = pose === 'frontal' ? 'ipd' : 'face_height', norm = normName === 'ipd' ? dist(A, 468, 473) : dist(A, 10, 152);
@@ -4022,6 +4179,14 @@ FaceMesh.Compare = {
       if (mm) { o.dx_mm = dx * mm.ipd_mm; o.dy_mm = dy * mm.ipd_mm; }
       return o;
     });
+    return { kind: 'compare', pose, tolerance: tol, T, rows, ca, cb, pose_ok: poseOk, norm: normName, mm, multi: [!!A.multi, !!B.multi] };
+  },
+  show(body, sheet, ia, ib, R, before, after, pose) {
+    const F = FaceMesh, tol = R.tolerance, mm = R.mm, T = R.T, rows = R.rows, ca = R.ca, cb = R.cb, poseOk = R.pose_ok, normName = R.norm;
+    const W = ia.naturalWidth, H = ia.naturalHeight;
+    const cv = document.createElement('canvas'); cv.width = W; cv.height = H; cv.setAttribute('aria-label', 'Сравнение снимков до и после');
+    const ctx = cv.getContext('2d');
+    const st = { mode: 'wipe', pos: 50, arrows: true };
     const render = () => {
       ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.clearRect(0, 0, W, H); ctx.globalAlpha = 1;
       ctx.drawImage(ia, 0, 0, W, H);
@@ -4049,14 +4214,14 @@ FaceMesh.Compare = {
       rows.map(r => h('tr', null, h('td', { text: r.label }), h('td', { class: 'n', text: f(mm ? r.dx_mm : r.dx) }), h('td', { class: 'n', text: f(mm ? r.dy_mm : r.dy) }))));
     const warn = [];
     if (!poseOk) warn.push('Поза на одном или обоих снимках вне допуска ' + tol + ' градусов от цели (до: ' + (ca.e ? 'yaw ' + ca.e.yaw.toFixed(0) + ', pitch ' + ca.e.pitch.toFixed(0) + ', roll ' + ca.e.roll.toFixed(0) : 'нет данных') + '; после: ' + (cb.e ? 'yaw ' + cb.e.yaw.toFixed(0) + ', pitch ' + cb.e.pitch.toFixed(0) + ', roll ' + cb.e.roll.toFixed(0) : 'нет данных') + '). Результат ориентировочный и в протокол не сохраняется.');
-    if (A.multi || B.multi) warn.push('На снимке найдено более одного лица: использовано самое крупное.');
+    if (R.multi && (R.multi[0] || R.multi[1])) warn.push('На снимке найдено более одного лица: использовано самое крупное.');
     if (pose === 'frontal' && !mm) warn.push('Калибровки нет: значения даны в долях межзрачкового расстояния, не в миллиметрах.');
     if (mm && mm.approx) warn.push('Калибровка по радужке приблизительная: миллиметры ориентировочные. Для точности используйте калибровку по карте.');
     if (pose !== 'frontal') warn.push('Для ракурса, отличного от анфаса, миллиметры не показываются: расстояния искажены поворотом.');
     const msg = h('div', { class: 'stack' }, warn.map(w => h('div', { class: 'banner warn', style: 'border-radius:10px', text: w })));
     const saveBtn = h('button', { class: 'btn pri', disabled: !poseOk || null, onclick: async e => {
       e.target.disabled = true;
-      const payload = { kind: 'compare', pose_ok: true, pose, before_id: before.id, after_id: after.id, before_ts: before.ts, after_ts: after.ts, norm: normName, scale: T.scale, rotation_deg: T.angle, tolerance: tol, rows: rows.map(r => { const o = { id: r.id, label: r.label, dx: r.dx, dy: r.dy }; if (mm) { o.dx_mm = r.dx_mm; o.dy_mm = r.dy_mm; } return o; }), ts: Math.floor(Date.now() / 1000) };
+      const payload = { kind: 'compare', pose_ok: true, source: R.source, pose, before_id: before.id, after_id: after.id, before_ts: before.ts, after_ts: after.ts, norm: normName, scale: T.scale, rotation_deg: T.angle, tolerance: tol, rows: rows.map(r => { const o = { id: r.id, label: r.label, dx: r.dx, dy: r.dy }; if (mm) { o.dx_mm = r.dx_mm; o.dy_mm = r.dy_mm; } return o; }), ts: Math.floor(Date.now() / 1000) };
       if (mm) payload.calibration = mm;
       try { await Api.post('/rooms/' + Api.room + '/measurements', payload); F.hist = null; Toast.show('Сравнение сохранено в протокол'); } catch (er) { Toast.err(er); e.target.disabled = false; }
     } }, 'Сохранить в протокол');

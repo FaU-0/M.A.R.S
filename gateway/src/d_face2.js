@@ -190,7 +190,7 @@ Object.assign(FaceMesh, {
   symTable(p, forPrint) {
     const k = p.calibration && p.calibration.ipd_mm, rows = p.rows || [];
     const unit = k ? ' (МЗР / мм)' : ' (доли МЗР)';
-    const src = k ? ' Источник масштаба: ' + p.calibration.label + '.' : ' Калибровки нет: значения в мм не показываются.';
+    const src = (k ? ' Источник масштаба: ' + p.calibration.label + '.' : ' Калибровки нет: значения в мм не показываются.') + (p.source === 'device' ? ' Рассчитано на устройстве.' : p.source === 'vision' ? ' Рассчитано сервисом анализа.' : '');
     return h('div', { class: 'stack' },
       h('table', { class: 'tb' }, h('tr', null, h('th', { text: 'Метрика' + unit }), h('th', { class: 'n', text: 'Правая' }), h('th', { class: 'n', text: 'Левая' }), h('th', { class: 'n', text: 'Разность' })),
         rows.map(r => h('tr', null, h('td', { text: r.label }), h('td', { class: 'n', text: fx(r.right) + (k ? ' / ' + fx(r.right_mm, 1) : '') }), h('td', { class: 'n', text: fx(r.left) + (k ? ' / ' + fx(r.left_mm, 1) : '') }), h('td', { class: 'n', text: fx(r.diff) + (k ? ' / ' + fx(r.diff_mm, 1) : '') })))),
@@ -228,7 +228,10 @@ Object.assign(FaceMesh, {
     const go = async () => {
       T.body.replaceChildren();
       try {
-        const res = await this.Symmetry.run((p, msg) => { T.prog.value = p; T.hint.textContent = (this.trk && this.trk.lost()) ? 'Лицо не найдено' : msg; }, T.signal);
+        const loc = await this.Symmetry.run((p, msg) => { T.prog.value = p; T.hint.textContent = (this.trk && this.trk.lost()) ? 'Лицо не найдено' : msg; }, T.signal);
+        if (T.isClosed()) return;
+        T.hint.textContent = 'Расчёт...';
+        const res = await this.Remote.pick('symmetry', { frames: loc._frames, tolerance: this.tol, calibration: this.cal }, loc, T.signal);
         if (T.isClosed()) return;
         T.hint.textContent = 'Готово'; T.prog.value = 1;
         T.body.replaceChildren(this.symTable(res), h('div', { class: 'row wrap' },
@@ -242,16 +245,21 @@ Object.assign(FaceMesh, {
     if (!(await this.ensureConsent())) return;
     this.busy++; await this.sync(); if (!this.trk) { this.busy--; return; }
     const T = this.taskSheet('Подвижность лица'), out = [];
+    const finish = async () => {
+      const loc = { kind: 'mobility', pose_ok: true, tolerance: Math.max(this.tol * 2, 10), tasks: out.slice(), ts: Math.floor(Date.now() / 1000) };
+      T.hint.textContent = 'Расчёт...'; T.body.replaceChildren();
+      let res;
+      try { res = await this.Remote.pick('mobility', { tasks: out.map(t => ({ id: t.id, frames: t._frames })), tolerance: this.tol }, loc, T.signal); }
+      catch (e) { if (T.isClosed()) return; T.hint.textContent = ''; T.body.replaceChildren(h('p', { text: e.message }), h('button', { class: 'btn pri', onclick: () => { out.length = 0; next(0); } }, 'Пройти заново')); return; }
+      if (T.isClosed()) return;
+      T.hint.textContent = 'Готово'; T.prog.value = 1;
+      T.body.replaceChildren(this.mobTable(res), h('div', { class: 'row wrap' },
+        h('button', { class: 'btn pri', onclick: async e => { e.target.disabled = true; if (await this.sendResult(res)) T.s.close(); else e.target.disabled = false; } }, 'Отправить врачу'),
+        h('button', { class: 'btn sec', onclick: () => { out.length = 0; next(0); } }, 'Пройти заново')));
+    };
     const next = i => {
       if (T.isClosed()) return;
-      if (i >= this.Mobility.TASKS.length) {
-        const res = { kind: 'mobility', pose_ok: true, tolerance: Math.max(this.tol * 2, 10), tasks: out, ts: Math.floor(Date.now() / 1000) };
-        T.hint.textContent = 'Готово'; T.prog.value = 1;
-        T.body.replaceChildren(this.mobTable(res), h('div', { class: 'row wrap' },
-          h('button', { class: 'btn pri', onclick: async e => { e.target.disabled = true; if (await this.sendResult(res)) T.s.close(); else e.target.disabled = false; } }, 'Отправить врачу'),
-          h('button', { class: 'btn sec', onclick: () => { out.length = 0; next(0); } }, 'Пройти заново')));
-        return;
-      }
+      if (i >= this.Mobility.TASKS.length) return finish();
       const task = this.Mobility.TASKS[i];
       T.prog.value = 0; T.hint.textContent = task.label + '. Нажмите «Начать»';
       T.body.replaceChildren(h('button', { class: 'btn pri lg', onclick: async () => {
