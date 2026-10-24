@@ -269,13 +269,31 @@ def create_doctor(login, name, password, is_admin=0):
 
 
 def bootstrap_admin():
-    if DB.one("SELECT id FROM doctors LIMIT 1"):
-        return
-    pw = secrets.token_urlsafe(9)
-    create_doctor("admin", "Администратор", pw, 1)
+    """Администратор admin. Пароль: ADMIN_PASSWORD, иначе файл DATA_DIR/admin_password.txt,
+    иначе случайный (сохраняется в этот файл). Логин и пароль печатаются при каждом запуске."""
+    pfile = DATA_DIR / "admin_password.txt"
+    fixed = os.environ.get("ADMIN_PASSWORD", "").strip()
+    reset = _env_bool("RESET_ADMIN", False)
+    pw = fixed
+    if not pw and not reset and pfile.is_file():
+        pw = pfile.read_text(encoding="utf-8").strip()
+    if not pw:
+        pw = secrets.token_urlsafe(9)
+    try:
+        pfile.write_text(pw + "\n", encoding="utf-8")
+        os.chmod(str(pfile), 0o600)
+    except OSError:
+        pass
+    row = DB.one("SELECT id, salt, pw FROM doctors WHERE login='admin'")
+    if not row:
+        create_doctor("admin", "Администратор", pw, 1)
+    elif not hmac.compare_digest(bytes(row["pw"]), hash_pw(pw, bytes(row["salt"]))):
+        salt = secrets.token_bytes(16)
+        DB.run("UPDATE doctors SET salt=?, pw=?, is_admin=1 WHERE id=?", (salt, hash_pw(pw, salt), row["id"]))
+        DB.run("DELETE FROM sessions WHERE doctor_id=?", (row["id"],))
     print("=" * 64)
-    print("Создан администратор. Логин: admin   Пароль: %s" % pw)
-    print("Пароль показан один раз. Сохраните его.")
+    print("Вход администратора.  Логин: admin   Пароль: %s" % pw)
+    print("Пароль хранится в файле %s" % pfile)
     print("=" * 64)
 
 
