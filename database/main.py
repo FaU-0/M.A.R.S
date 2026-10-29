@@ -75,6 +75,6 @@ def ready():
 
 
 if __name__ == "__main__":
-    STORE = Store(config.data_dir() / "mars.sqlite3")
+    STORE = Store(config.secure_data_dir() / "mars.sqlite3")
     threading.Thread(target=backup_loop, daemon=True).start()
     Service(SVC, routes={("POST", "/v1/q"): r_query, ("POST", "/v1/backup"): r_backup}, ready_fn=ready).run()

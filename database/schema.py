@@ -45,4 +45,14 @@ CREATE INDEX IF NOT EXISTS ix_photos_patient ON photos(patient_id, pose, ts);
 CREATE INDEX IF NOT EXISTS ix_meas_patient ON measurements(patient_id, ts);
 """
 
-MIGRATIONS = [V1]
+# 2. Снимки и измерения, сохранённые до создания карточки пациента, оставались без patient_id:
+#    их не было в истории пациента, а проверка доступа к таким снимкам пропускалась.
+V2 = """
+UPDATE photos SET patient_id=(SELECT a.patient_id FROM appointments a WHERE a.id=photos.appt_id)
+  WHERE patient_id IS NULL;
+UPDATE measurements SET patient_id=(SELECT a.patient_id FROM appointments a WHERE a.id=measurements.appt_id)
+  WHERE patient_id IS NULL;
+CREATE INDEX IF NOT EXISTS ix_photos_appt ON photos(appt_id)
+"""
+
+MIGRATIONS = [V1, V2]

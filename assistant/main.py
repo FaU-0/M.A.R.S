@@ -69,7 +69,8 @@ def find_entities(text):
         items = [{"text": json.loads('"%s"' % m.group(1)), "type": m.group(2)}
                  for m in re.finditer(r'\{\s*"text"\s*:\s*"((?:[^"\\]|\\.)*)"\s*,\s*"type"\s*:\s*"([A-Z]+)"\s*\}', content)]
         if not items:
-            log.warning("модель вернула не JSON: %.200s", content)
+            # сам ответ не пишем: в нём имена и места из расшифровки
+            log.warning("модель вернула не JSON (%d символов)", len(content))
         return items
 
 

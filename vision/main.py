@@ -93,7 +93,7 @@ def r_calibrate(data, rid):
         _need_obj(data)
         method = data.get("method")
         if method == "iris":
-            return 200, {"calibration": metrics.calibrate_iris(data.get("frames"))}
+            return 200, {"calibration": metrics.calibrate_iris(data.get("frames"), _tol(data))}
         if method == "card":
             ipd = data.get("ipd_px")
             if ipd is None and isinstance(data.get("frame"), dict):

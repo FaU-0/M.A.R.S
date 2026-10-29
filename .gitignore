@@ -1,2 +1,5 @@
-mars_data/
 __pycache__/
+*.pyc
+.DS_Store
+mars_data/
+speech/.venv/

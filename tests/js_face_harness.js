@@ -36,7 +36,8 @@ for (const c of inp.mob) {
 }
 for (const c of inp.cmp) { F.tol = c.tol; out.cmp.push(F.Compare.calc(cur(c.A), cur(c.B), c.pose, c.tol, c.cal)); }
 for (const fr of inp.iris) {
-  const S = fr.map(cur).map(f => ({ iris: F.Calibrate.irisPx(f), ipd: F.Calibrate.ipdPx(f) })).filter(s => s.iris && s.ipd);
+  // как калибровка в браузере (d_face2.js): только кадры с позой в допуске 5 градусов
+  const S = fr.map(cur).filter(f => F.Pose.inTol(F.Pose.euler(f), 5)).map(f => ({ iris: F.Calibrate.irisPx(f), ipd: F.Calibrate.ipdPx(f) })).filter(s => s.iris && s.ipd);
   out.iris.push(S.length >= 12 ? F.Calibrate.fromIris(S) : null);
 }
 for (const c of inp.card) out.card.push(F.Calibrate.fromCard(c.pts, c.ipd));

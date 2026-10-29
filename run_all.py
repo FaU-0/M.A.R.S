@@ -35,6 +35,7 @@ def main():
     names = [n for n in names if n not in skip]
     secondary = [n for n in names if n != "gateway"]
 
+    os.umask(0o077)  # дочерние сервисы создают файлы пациентов только для владельца
     env = dict(os.environ)
     env.setdefault("DATA_DIR", str(Path(env.get("DATA_DIR", "mars_data")).resolve()))
     env.setdefault("SERVICE_SECRET", secrets.token_hex(32))

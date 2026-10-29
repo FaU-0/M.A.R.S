@@ -117,6 +117,40 @@ def main():
         db = sqlite3.connect(str(Path(tmp) / "mars.sqlite3"))
         n = db.execute("SELECT COUNT(*) FROM audit WHERE action='patient_access_denied' AND actor='doctor:doc_b'").fetchone()[0]
         check(n >= 4, "попытки Б записаны в журнал аудита (%d)" % n)
+
+        # снимок в приёме без пациента (комната открыта без записи, карточки ещё нет)
+        s, rm2 = a.call("POST", "/rooms", {})
+        s, ph2 = a.call("POST", "/rooms/%s/frames" % rm2["room"], tok=rm2["token"], raw=JPEG,
+                        headers={"Content-Type": "image/jpeg", "X-Pose": "frontal"})
+        check(s == 200 and b.call("GET", "/photos/%d" % ph2["id"])[0] == 404,
+              "снимок приёма без пациента: чужой врач не видит его по номеру (404)")
+        check(a.call("GET", "/photos/%d" % ph2["id"])[0] == 200, "снимок приёма без пациента: врач приёма видит")
+        s, _ = a.call("POST", "/rooms/%s/protocol" % rm2["room"], {"card": {"full_name": "Позднев Карточкин"}}, tok=rm2["token"])
+        pid2 = db.execute("SELECT patient_id FROM photos WHERE id=?", (ph2["id"],)).fetchone()[0]
+        s, r = a.call("GET", "/patients/%d/photos" % pid2) if pid2 else (0, {})
+        check(pid2 and any(x["id"] == ph2["id"] for x in r.get("photos", [])),
+              "после создания карточки снимок привязан к пациенту и виден в его истории")
+
+        # неназначенный приём (появляется в режиме без входа или если врача удалили)
+        db.execute("INSERT INTO patients(full_name, created) VALUES('Ничейный Пациент', 1)")
+        npid = db.execute("SELECT last_insert_rowid()").fetchone()[0]
+        db.execute("INSERT INTO appointments(code, patient_id, doctor_id, scheduled, status, created) VALUES('NULLDR', ?, NULL, ?, 'planned', 1)",
+                   (npid, int(time.time())))
+        db.commit()
+        naid = db.execute("SELECT id FROM appointments WHERE code='NULLDR'").fetchone()[0]
+        s, lst = b.call("GET", "/appointments")
+        check(all(x["id"] != naid for x in lst["appointments"]), "неназначенный приём не виден обычному врачу в списке")
+        s, r = b.call("POST", "/rooms", {"appointment_id": naid})
+        check(s == 403, "обычный врач не может присвоить неназначенный приём и получить историю пациента (403)")
+        check(b.call("GET", "/patients/%d/photos" % npid)[0] == 404, "история ничейного пациента врачу Б недоступна")
+        s, r = admin.call("POST", "/rooms", {"appointment_id": naid})
+        check(s == 201, "администратор открывает неназначенный приём")
+
+        # права на данные пациентов
+        mode = lambda x: oct(os.stat(x).st_mode & 0o777)
+        photo_file = next((Path(tmp) / "photos").iterdir())
+        check(mode(tmp) == "0o700" and mode(Path(tmp) / "mars.sqlite3") == "0o600" and mode(photo_file) == "0o600",
+              "папка данных 700, база и снимки 600 (%s, %s, %s)" % (mode(tmp), mode(Path(tmp) / "mars.sqlite3"), mode(photo_file)))
     finally:
         p.terminate()
         p.wait(10)

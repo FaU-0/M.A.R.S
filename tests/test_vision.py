@@ -103,6 +103,12 @@ def build_cases(seed=7):
         A = frame(rng, face, (tgt + rng.uniform(-5.6, 5.6), rng.uniform(-5.3, 5.3), rng.uniform(-5.3, 5.3)), multi=i % 4 == 0)
         B = frame(rng, face, (tgt + rng.uniform(-5.6, 5.6), rng.uniform(-5.3, 5.3), rng.uniform(-5.3, 5.3)), jitter=0.006)
         cases["cmp"].append({"A": A, "B": B, "pose": pose, "tol": tol, "cal": cal_card if i % 3 == 0 else None})
+    # направление поворота: снимки «влево 45°», снятые влево и вправо (последние два случая сравнения)
+    face = base_face(rng)
+    for yaw in (45.0, -45.0):
+        A = frame(rng, face, (yaw, 1.0, -1.0), jitter=0.0005)
+        B = frame(rng, face, (yaw, -1.0, 1.0), jitter=0.0005)
+        cases["cmp"].append({"A": A, "B": B, "pose": "left45", "tol": 5.0, "cal": None})
     for i in range(4):
         face = base_face(rng)
         cases["iris"].append([frame(rng, face, angles(rng, 3)) for _ in range(rng.randint(12, 30))])
@@ -155,7 +161,7 @@ def py_side(cases):
         "sym": [safe(lambda c=c: metrics.symmetry(c["frames"], c["tol"], c["cal"])) for c in cases["sym"]],
         "mob": [safe(lambda c=c: metrics.mob_task(c["task"], c["frames"], max(c["tol"] * 2, 10))) for c in cases["mob"]],
         "cmp": [safe(lambda c=c: metrics.compare(c["A"], c["B"], c["pose"], c["tol"], c["cal"])) for c in cases["cmp"]],
-        "iris": [safe(lambda c=c: metrics.calibrate_iris(c)) for c in cases["iris"]],
+        "iris": [safe(lambda c=c: metrics.calibrate_iris(c, 5.0)) for c in cases["iris"]],
         "card": [safe(lambda c=c: metrics.calibrate_card(c["pts"], c["ipd"])) for c in cases["card"]],
     }
 
@@ -180,7 +186,17 @@ def part_parity():
     # поза: часть кадров должна отбрасываться, иначе проверка допуска ничего не проверяет
     some_none = any(x is None for x in js["mob"]) or any(x is None for x in js["sym"])
     some_bad_pose = any(c and not c["pose_ok"] for c in js["cmp"]) and any(c and c["pose_ok"] for c in js["cmp"])
+    check(py["cmp"][-2]["pose_ok"] is True and py["cmp"][-1]["pose_ok"] is False and js["cmp"][-1]["pose_ok"] is False,
+          "снимок «влево 45°», снятый вправо, не проходит проверку позы (и в браузере, и в vision)")
     check(some_bad_pose, "в наборе есть сравнения и в допуске позы, и вне его")
+    rng = random.Random(3)
+    face = base_face(rng)
+    turned = [frame(rng, face, (20.0, 0.0, 0.0)) for _ in range(20)]
+    try:
+        metrics.calibrate_iris(turned, 5.0)
+        check(False, "калибровка по радужке отклоняет кадры с повёрнутой головой")
+    except metrics.MetricsError as e:
+        check(e.code == "not_enough_frames", "калибровка по радужке отклоняет кадры с повёрнутой головой")
     print("  (кадров с недостаточной выборкой: %s)" % ("есть" if some_none else "нет"))
 
 
@@ -224,8 +240,10 @@ def start(base, without):
     env = dict(os.environ, DATA_DIR=tmp, PORT=str(base), ADMIN_PASSWORD="test-pass-1234")
     for i, n in enumerate(("vision", "reports", "speech", "assistant", "database"), 1):
         env["MARS_%s_PORT" % n.upper()] = str(base + i)
-    return subprocess.Popen([sys.executable, str(ROOT / "run_all.py"), "--without", without], env=env, cwd=str(ROOT),
-                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    p = subprocess.Popen([sys.executable, str(ROOT / "run_all.py"), "--without", without], env=env, cwd=str(ROOT),
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    p.data_dir = tmp
+    return p
 
 
 def stop(p):
@@ -266,6 +284,14 @@ def part_gateway():
         check(d2.get("id") == jid, "повтор с тем же ключом не создаёт дубль")
         d = wait_job(g, jid)
         check(d.get("status") == "done" and not diff(d.get("result"), want), "vision посчитал симметрию, результат как у метрик")
+        # браузер присылает результат с номером задания, но подменёнными числами: сервер сохраняет числа vision
+        forged = dict(d["result"], job_id=jid, rows=[{"id": "eo", "right": 99.0, "left": 0.0, "diff": 99.0}])
+        s, _ = g.call("POST", "/rooms/%s/measurements" % g.code, forged)
+        import sqlite3
+        body = json.loads(sqlite3.connect(os.path.join(p.data_dir, "mars.sqlite3")).execute(
+            "SELECT body FROM measurements WHERE kind='symmetry' ORDER BY id DESC LIMIT 1").fetchone()[0])
+        check(s == 200 and body.get("verified") is True and not diff(body["rows"], want["rows"]),
+              "измерение с номером задания vision сохранено с числами сервера, подмена из браузера не прошла")
         s, d = g.call("POST", "/rooms/%s/analyze" % g.code, {"kind": "symmetry", "key": "k-sym-few1", "input": dict(inp, frames=inp["frames"][:3])})
         d = wait_job(g, d["id"])
         check(d.get("status") == "error" and d["error"].get("error") == "not_enough_frames", "мало кадров: задание с понятной ошибкой")

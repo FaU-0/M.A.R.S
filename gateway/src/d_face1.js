@@ -44,7 +44,7 @@ FaceMesh.Remote = {
       await new Promise(r => setTimeout(r, 400));
       job = await Api.get('/rooms/' + Api.room + '/jobs/' + job.id, { signal }).catch(e => { if (e && e.name === 'AbortError') throw e; return job; });
     }
-    if (job.status === 'done') return job.result;
+    if (job.status === 'done') return Object.assign({}, job.result, { job_id: job.id });  /* по номеру задания сервер сохранит числа vision, а не браузера */
     throw new Error((job.error && job.error.message) || 'Ошибка анализа');
   },
   async pick(kind, input, local, signal, downMsg) {
@@ -203,7 +203,17 @@ FaceMesh.Pose = {
     else if (aMax > tol) { hint = 'Выровняйте голову'; level = 'medium'; }
     return Object.assign({ level, hint, tol, size: g.size, cx: g.cx, cy: g.cy, t: performance.now() }, e, st ? { mean: st.mean, over: st.over, sharp: st.sharp, bg: st.bg } : {});
   },
-  inTol(e, tol) { return !!e && Math.abs(e.yaw) <= tol && Math.abs(e.pitch) <= tol && Math.abs(e.roll) <= tol; }
+  inTol(e, tol) { return !!e && Math.abs(e.yaw) <= tol && Math.abs(e.pitch) <= tol && Math.abs(e.roll) <= tol; },
+  /* углы для отдельного снимка: знак yaw уточняется по положению носа на этом же снимке, без накопленного состояния.
+     Так же считает vision (metrics.euler), поэтому проверка позы при сравнении совпадает в браузере и на сервере */
+  eulerStill(cur) {
+    if (!cur || !cur.mat) return null;
+    const R = this.rot(cur.mat);
+    let yaw = deg(Math.atan2(R[0][2], R[2][2])); const pitch = deg(Math.asin(clamp(-R[1][2], -1, 1))), roll = deg(Math.atan2(R[1][0], R[1][1]));
+    const lm = cur.lm, a = lm[LM.REO], b = lm[LM.LEO], n = lm[LM.NOSE];
+    if (a && b && n) { const wid = b.x - a.x; if (Math.abs(wid) > 1e-3) { const yl = (n.x - (a.x + b.x) / 2) / wid; if (Math.abs(yl) > 0.12 && Math.abs(yaw) > 10 && Math.sign(yl) !== Math.sign(yaw)) yaw = -yaw; } }
+    return { yaw, pitch, roll };
+  }
 };
 
 /* --- Overlay: сетка и контуры, HiDPI, зеркало --- */

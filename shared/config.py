@@ -5,11 +5,24 @@ import secrets
 from pathlib import Path
 
 # Порты по умолчанию. gateway (8000) слушает снаружи, остальные только 127.0.0.1.
-SERVICE_PORTS = {"vision": 8001, "reports": 8002, "speech": 8003, "assistant": 8004}
+SERVICE_PORTS = {"vision": 8001, "reports": 8002, "speech": 8003, "assistant": 8004, "database": 8005}
 
 
 def data_dir():
     return Path(os.environ.get("DATA_DIR", "mars_data")).resolve()
+
+
+def secure_data_dir():
+    """Данные пациентов доступны только владельцу: новые файлы 0600, папка данных 0700.
+    Вызывается при запуске каждого процесса, который пишет в DATA_DIR."""
+    os.umask(0o077)
+    d = data_dir()
+    d.mkdir(parents=True, exist_ok=True)
+    try:
+        os.chmod(d, 0o700)
+    except OSError:
+        pass
+    return d
 
 
 def service_url(name):
@@ -45,11 +58,9 @@ def service_secret():
             return path.read_text(encoding="utf-8").strip()
         path.parent.mkdir(parents=True, exist_ok=True)
         value = secrets.token_hex(32)
-        path.write_text(value, encoding="utf-8")
-        try:
-            os.chmod(path, 0o600)
-        except OSError:
-            pass
+        fd = os.open(str(path), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)  # сразу 0600, без окна между записью и chmod
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(value)
         return value
     except OSError:
         return secrets.token_hex(32)

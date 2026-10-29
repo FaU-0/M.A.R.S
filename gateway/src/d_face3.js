@@ -222,7 +222,8 @@ FaceMesh.Compare = {
   /* расчёт сравнения по точкам двух снимков; тот же результат отдаёт сервис vision (/v1/compare) */
   calc(A, B, pose, tol, cal) {
     const F = FaceMesh, tgt = POSE_YAW[pose], mm = pose === 'frontal' && cal && cal.ipd_mm ? cal : null;
-    const chk = X => { const e = F.Pose.euler(X); if (!e) return { ok: false, e: null }; const dy = pose === 'frontal' ? Math.abs(e.yaw) : Math.abs(Math.abs(e.yaw) - Math.abs(tgt)); return { ok: dy <= tol && Math.abs(e.pitch) <= tol && Math.abs(e.roll) <= tol, e }; };
+    /* с учётом направления поворота: снимок «влево 45°», снятый вправо, не проходит */
+    const chk = X => { const e = F.Pose.eulerStill(X); if (!e) return { ok: false, e: null }; const dy = Math.abs(e.yaw - tgt); return { ok: dy <= tol && Math.abs(e.pitch) <= tol && Math.abs(e.roll) <= tol, e }; };
     const ca = chk(A), cb = chk(B), poseOk = ca.ok && cb.ok && !!A.mat && !!B.mat;
     const T = this.procrustes(A, B);
     /* нормировка: по МЗР для анфаса, по высоте лица для остальных ракурсов */
@@ -277,7 +278,7 @@ FaceMesh.Compare = {
     const msg = h('div', { class: 'stack' }, warn.map(w => h('div', { class: 'banner warn', style: 'border-radius:10px', text: w })));
     const saveBtn = h('button', { class: 'btn pri', disabled: !poseOk || null, onclick: async e => {
       e.target.disabled = true;
-      const payload = { kind: 'compare', pose_ok: true, source: R.source, pose, before_id: before.id, after_id: after.id, before_ts: before.ts, after_ts: after.ts, norm: normName, scale: T.scale, rotation_deg: T.angle, tolerance: tol, rows: rows.map(r => { const o = { id: r.id, label: r.label, dx: r.dx, dy: r.dy }; if (mm) { o.dx_mm = r.dx_mm; o.dy_mm = r.dy_mm; } return o; }), ts: Math.floor(Date.now() / 1000) };
+      const payload = { kind: 'compare', pose_ok: true, source: R.source, job_id: R.job_id, pose, before_id: before.id, after_id: after.id, before_ts: before.ts, after_ts: after.ts, norm: normName, scale: T.scale, rotation_deg: T.angle, tolerance: tol, rows: rows.map(r => { const o = { id: r.id, label: r.label, dx: r.dx, dy: r.dy }; if (mm) { o.dx_mm = r.dx_mm; o.dy_mm = r.dy_mm; } return o; }), ts: Math.floor(Date.now() / 1000) };
       if (mm) payload.calibration = mm;
       try { await Api.post('/rooms/' + Api.room + '/measurements', payload); F.hist = null; Toast.show('Сравнение сохранено в протокол'); } catch (er) { Toast.err(er); e.target.disabled = false; }
     } }, 'Сохранить в протокол');

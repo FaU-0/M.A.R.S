@@ -393,7 +393,7 @@ const Print = {
     const c = d.conclusion || {}, row = (t, v) => [h('h2', { text: t }), h('p', { style: 'white-space:pre-wrap', text: v || '-' })];
     this.go(h('div', null, h('h1', { text: d.center || Cfg.center }), h('h2', { text: 'Заключение консультации' }),
       h('table', null, h('tr', null, h('th', { text: 'Пациент' }), h('td', { text: d.patient || '' })), h('tr', null, h('th', { text: 'Дата' }), h('td', { text: d.date || '' })), h('tr', null, h('th', { text: 'Врач' }), h('td', { text: d.doctor || '' }))),
-      row('Жалобы', c.complaints), row('Анамнез', c.anamnesis), row('Диагноз', (c.diagnosis || '') + (c.icd ? ' (МКБ-10: ' + c.icd + ')' : '')), row('Рекомендации', c.recommendations),
+      row('Жалобы', c.complaints), row('Анамнез', c.anamnesis), row('Диагноз', c.diagnosis), row('Код МКБ-10', c.icd), row('Рекомендации', c.recommendations),
       row('Повторный контакт', c.followup),
       h('p', { class: 'sm', text: 'Документ сформирован по результатам дистанционной консультации. Это заключение консультации, а не электронный рецепт.' }),
       h('div', { class: 'sign', text: 'Подпись врача ______________________ / ' + (d.doctor || '') + ' /' })));

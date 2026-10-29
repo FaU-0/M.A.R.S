@@ -65,7 +65,10 @@ def main():
         s, d, _ = call("POST", "/rooms/%s/render-conclusion" % code, payload, tok)
         check(s == 200 and "html" in d, "reports отдал HTML заключения")
         h = d.get("html", "")
-        check("ОРВИ (МКБ-10: J06.9)" in h and "кашель" in h, "в HTML есть диагноз с кодом и жалобы")
+        check("ОРВИ" in h and "Код МКБ-10</h2><p class=\"pre\">J06.9" in h and "кашель" in h, "в HTML есть диагноз, код МКБ-10 отдельной строкой и жалобы")
+        s, d, _ = call("POST", "/rooms/%s/render-conclusion" % code, dict(payload, conclusion=dict(payload["conclusion"], diagnosis="Д" * 7900)), tok)
+        h2 = d.get("html", "") if isinstance(d, dict) else ""
+        check(s == 200 and "J06.9" in h2 and "[текст сокращён]" not in h2, "длинный диагноз (7900 знаков) печатается целиком и не вытесняет код МКБ-10")
         check("<b>Пётр</b>" not in h and "&lt;b&gt;" in h, "пользовательский текст экранирован")
         s, d, _ = call("POST", "/rooms/%s/render-conclusion" % code, dict(payload, conclusion={"icd": "xx"}), tok)
         check(s == 400, "неверный код МКБ отклонён на gateway (400)")

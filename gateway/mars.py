@@ -16,6 +16,7 @@ import mimetypes
 import os
 import re
 import secrets
+import shutil
 import smtplib
 import socket
 import socketserver  # noqa: F401  (ThreadingHTTPServer построен на нём)
@@ -322,7 +323,7 @@ class Room:
     def __init__(self, code, appt_id):
         self.code = code
         self.appt_id = appt_id
-        self.doc_token = None
+        self.doc_tokens = {}  # токен -> логин врача: у каждого врача своя ссылка, в аудите видно, кто именно
         self.pat_token = None
         self.events = []
         self.next_id = 1
@@ -393,16 +394,18 @@ def get_room(code, create=False):
 
 
 def room_role(room, headers):
+    """(роль, логин врача или None) по токену комнаты."""
     auth = headers.get("Authorization", "")
     if not auth.startswith("Bearer "):
-        return None
+        return None, None
     tok = auth[7:].strip().encode("utf-8", "ignore")
     with COND:
-        if room.doc_token and hmac.compare_digest(tok, room.doc_token.encode()):
-            return "doctor"
+        for t, login in room.doc_tokens.items():
+            if hmac.compare_digest(tok, t.encode()):
+                return "doctor", login
         if room.pat_token and hmac.compare_digest(tok, room.pat_token.encode()):
-            return "patient"
-    return None
+            return "patient", None
+    return None, None
 
 
 def cleanup_loop(stop_evt):
@@ -485,6 +488,9 @@ def save_card(appt, card):
         name = vals.get("full_name") or "Без имени"
         pid = DB.run("patients.add", (name, now()))
         DB.run("appointments.set_patient", (pid, appt["id"]))
+        # снимки и измерения, сделанные до карточки, иначе остались бы без пациента и без проверки доступа
+        DB.run("photos.attach_patient", (pid, appt["id"]))
+        DB.run("measurements.attach_patient", (pid, appt["id"]))
     if vals:
         if "full_name" in vals and not vals["full_name"]:
             vals.pop("full_name")
@@ -583,8 +589,14 @@ VENDOR_MIME = {".mjs": "text/javascript", ".js": "text/javascript", ".wasm": "ap
                ".task": "application/octet-stream"}
 
 
+SESSION_SEEN = {}  # хэш сессии -> (логин, когда проверена по базе)
+SESSION_RECHECK = 60
+SESSION_GRACE = 600
+
+
 class Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
+    who = "unknown"  # кто действует в комнате (doctor:<логин> или patient), выставляет room_access
     server_version = "MARS"
     sys_version = ""
     timeout = 90
@@ -849,6 +861,7 @@ class Handler(BaseHTTPRequestHandler):
         sid = self.cookie("mars_sid")
         doc = self.doctor(required=False)
         if sid:
+            SESSION_SEEN.pop(sid_hash(sid), None)
             DB.run("sessions.delete", (sid_hash(sid),))
         if doc:
             audit(self.actor(doc), "logout")
@@ -954,7 +967,16 @@ class Handler(BaseHTTPRequestHandler):
         doc = self.doctor()
         q = "%" + clean_text((qs.get("q") or [""])[0], 100).replace("%", "") + "%"
         rows = DB.q("patients.search", (q,)) if doc["is_admin"] else DB.q("patients.search_for_doctor", (doc["id"], q))
+        audit(self.actor(doc), "patient_search", "", "found=%d" % len(rows))  # сам запрос (фамилию) не пишем
         self.send_json(200, {"patients": rows})
+
+    def need_appointment(self, doc, aid):
+        """Данные приёма без пациента (снимки до создания карточки): только врач этого приёма или администратор."""
+        appt = DB.one("appointments.by_id", (aid,))
+        if doc["is_admin"] or (appt and appt["doctor_id"] and appt["doctor_id"] == doc["id"]):
+            return
+        audit(self.actor(doc), "patient_access_denied", "", "appointment=%s" % aid)
+        raise ApiError(404, "not_found", "Приём не найден")
 
     def need_patient(self, doc, pid):
         """Врач видит пациента только через свой приём; администратор видит всех.
@@ -969,7 +991,9 @@ class Handler(BaseHTTPRequestHandler):
         self.need_patient(doc, pid)
         if sub == "photos":
             rows = DB.q("photos.of_patient", (pid,))
+            audit(self.actor(doc), "patient_photos_viewed", "", "patient=%d" % pid)
             return self.send_json(200, {"photos": rows})
+        audit(self.actor(doc), "patient_measurements_viewed", "", "patient=%d" % pid)
         rows = DB.q("measurements.of_patient", (pid,))
         for r in rows:
             try:
@@ -983,11 +1007,13 @@ class Handler(BaseHTTPRequestHandler):
         row = DB.one("photos.by_id", (pid,))
         if not row:
             raise ApiError(404, "not_found", "Снимок не найден")
-        if row["patient_id"] is not None:
-            try:
+        try:
+            if row["patient_id"] is not None:
                 self.need_patient(doc, row["patient_id"])
-            except ApiError:
-                raise ApiError(404, "not_found", "Снимок не найден")
+            else:
+                self.need_appointment(doc, row["appt_id"])
+        except ApiError:
+            raise ApiError(404, "not_found", "Снимок не найден")
         p = DATA_DIR / row["path"]
         if not p.is_file():
             raise ApiError(404, "not_found", "Файл снимка отсутствует")
@@ -1006,8 +1032,9 @@ class Handler(BaseHTTPRequestHandler):
                 raise ApiError(404, "appointment_not_found", "Приём не найден")
             if appt["status"] == "completed":
                 raise ApiError(410, "room_closed", "Консультация завершена")
-            if doc["id"] and appt["doctor_id"] and appt["doctor_id"] != doc["id"] and not doc["is_admin"]:
-                raise ApiError(403, "forbidden", "Приём назначен другому врачу")
+            if not doc["is_admin"] and appt["doctor_id"] != doc["id"]:
+                # неназначенный приём раздаёт администратор: иначе любой врач стал бы «своим» и получил историю пациента
+                raise ApiError(403, "forbidden", "Приём назначен другому врачу" if appt["doctor_id"] else "Приём не назначен: обратитесь к администратору")
         else:
             aid, code, _ = self.create_appt(doc, None, "", "", now())
             appt = DB.one("appointments.by_id", (aid,))
@@ -1016,9 +1043,10 @@ class Handler(BaseHTTPRequestHandler):
         with COND:
             if room.closed:
                 raise ApiError(410, "room_closed", "Консультация завершена")
-            if not room.doc_token:
-                room.doc_token = "doc_" + secrets.token_urlsafe(24)
-            token = room.doc_token
+            token = next((t for t, login in room.doc_tokens.items() if login == doc["login"]), None)
+            if not token:
+                token = "doc_" + secrets.token_urlsafe(24)
+                room.doc_tokens[token] = doc["login"]
             room.last = time.time()
         if not appt["doctor_id"] and doc["id"]:
             DB.run("appointments.set_doctor", (doc["id"], appt["id"]))
@@ -1061,16 +1089,50 @@ class Handler(BaseHTTPRequestHandler):
             audit("patient", "consent_consultation", room.code)
         self.send_json(200, {"token": token})
 
-    def need_room(self, code, sub_ok_closed=False):
+    def need_room(self, code, sub_ok_closed=False, fast=False):
         room = get_room(code)
         with COND:
             closed = room.closed
         if closed:
             raise ApiError(410, "room_closed", "Консультация прервана")
-        role = room_role(room, self.headers)
+        return room, self.room_access(room, fast)
+
+    def doctor_login(self, fast=False):
+        """Логин врача по сессии. Сессия, проверенная по базе меньше SESSION_RECHECK назад, в базу не ходит:
+        сигнализация звонка не зависит от database. Если база недоступна, действует последняя удачная
+        проверка не старше SESSION_GRACE. Выход врача убирает запись сразу."""
+        sid = self.cookie("mars_sid")
+        key = sid_hash(sid) if sid else None
+        hit = SESSION_SEEN.get(key) if key else None
+        if hit and time.time() - hit[1] < (SESSION_GRACE if fast else SESSION_RECHECK):
+            return hit[0]
+        try:
+            doc = self.doctor(required=False)
+        except DatabaseUnavailable:
+            if hit and time.time() - hit[1] < SESSION_GRACE:
+                return hit[0]
+            raise
+        if not doc:
+            return None
+        if key:
+            if len(SESSION_SEEN) > 5000:
+                SESSION_SEEN.clear()
+            SESSION_SEEN[key] = (doc["login"], time.time())
+        return doc["login"]
+
+    def room_access(self, room, fast=False):
+        """Роль в комнате. Ссылка врача действует только вместе с его сессией: после выхода врача
+        или отключения его учётной записи она перестаёт работать. self.who - кто действует, для аудита."""
+        role, login = room_role(room, self.headers)
         if not role:
             raise ApiError(401, "unauthorized", "Нет доступа к комнате")
-        return room, role
+        if role == "doctor":
+            if self.doctor_login(fast) != login:
+                raise ApiError(401, "unauthorized", "Войдите заново: ссылка врача действует только с его сессией")
+            self.who = "doctor:%s" % login
+        else:
+            self.who = "patient"
+        return role
 
     def h_ice(self, code):
         room, role = self.need_room(code)
@@ -1086,9 +1148,7 @@ class Handler(BaseHTTPRequestHandler):
         room = get_room(code)
         with COND:
             closed = room.closed
-        role = room_role(room, self.headers)
-        if not role:
-            raise ApiError(401, "unauthorized", "Нет доступа к комнате")
+        role = self.room_access(room, fast=True)  # опрос событий звонка: без запроса к базе
         try:
             after = int((qs.get("after") or ["0"])[0])
             wait = max(0.0, min(20.0, float((qs.get("wait") or ["0"])[0])))
@@ -1118,7 +1178,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_json(200, {"events": out, "last": room.next_id - 1})
 
     def h_events_post(self, code):
-        room, role = self.need_room(code)
+        room, role = self.need_room(code, fast=True)  # события звонка: сессия врача без запроса к базе
         other = "patient" if role == "doctor" else "doctor"
         raw_cost = 1
         # тип известен только после разбора тела; мягкий лимит применяем после
@@ -1199,7 +1259,8 @@ class Handler(BaseHTTPRequestHandler):
             room.delivered_kill.add("doctor")
             COND.notify_all()
         DB.run("appointments.set_completed", (now(), appt["id"]))
-        audit("doctor", "emergency_end", room.code)
+        finish_speech(appt)
+        audit(self.who, "emergency_end", room.code)
         self.send_json(202, {"status": "accepted", "id": ev["id"]})
 
     def control(self, room, role, appt, data):
@@ -1216,17 +1277,15 @@ class Handler(BaseHTTPRequestHandler):
             if not clean_text(loc.get("address")) or not clean_text(loc.get("phone")):
                 raise ApiError(400, "location_required", "Укажите адрес и телефон пациента перед началом приёма")
             DB.run("appointments.set_started", (now(), appt["id"]))
-            audit("doctor", "consultation_start", room.code)
+            audit(self.who, "consultation_start", room.code)
             return other, data
         if act == "end":
             if role != "doctor":
                 raise ApiError(403, "forbidden", "Только врач")
             DB.run("appointments.set_completed", (now(), appt["id"]))
-            set_speech(appt, active=False)
-            if service_enabled("assistant") and DB.one("jobs.any_transcribe", (appt["id"],)):
-                enqueue_deid(appt["id"])  # расшифровка уходит на обезличивание по «Завершить приём»
+            finish_speech(appt)
             room.ended = True
-            audit("doctor", "consultation_end", room.code)
+            audit(self.who, "consultation_end", room.code)
             return "all", data
         if act in ("speech_request", "speech_stop", "speech_consent"):
             return self.speech_control(room, role, appt, act, data)
@@ -1240,12 +1299,16 @@ class Handler(BaseHTTPRequestHandler):
                 raise ApiError(403, "forbidden", "Только врач")
             with COND:
                 room.pat_token = None
-            audit("doctor", "patient_seat_reset", room.code)
+            audit(self.who, "patient_seat_reset", room.code)
             return "doctor", {"action": "reset_patient"}
         return other, data
 
     def speech_control(self, room, role, appt, act, data):
-        """Запрос врача -> согласие пациента -> запись у обеих сторон. Пациент может отозвать в любой момент."""
+        """Запрос врача -> согласие пациента -> запись у обеих сторон. Пациент может отозвать в любой момент.
+        После завершения приёма запись не включается; при отзыве согласия недорасшифрованные куски удаляются."""
+        starting = act == "speech_request" or (act == "speech_consent" and data.get("granted") is True)
+        if starting and (room.ended or appt["status"] == "completed"):
+            raise ApiError(409, "appointment_ended", "Приём завершён: расшифровку включить нельзя")
         if act == "speech_request":
             if role != "doctor":
                 raise ApiError(403, "forbidden", "Только врач")
@@ -1254,13 +1317,14 @@ class Handler(BaseHTTPRequestHandler):
             if role != "doctor":
                 raise ApiError(403, "forbidden", "Только врач")
             sp = set_speech(appt, active=False)
-            audit("doctor", "speech_stopped", room.code)
+            audit(self.who, "speech_stopped", room.code)
             return "all", {"action": act, "speech": sp}
         if role != "patient":
             raise ApiError(403, "forbidden", "Только пациент")
         g = data.get("granted") is True
         sp = set_speech(appt, consent=g, active=g)
-        audit("patient", "consent_speech", room.code, "granted" if g else "revoked")
+        dropped = 0 if g else cancel_queued_speech(appt["id"], "consent_revoked")
+        audit("patient", "consent_speech", room.code, "granted" if g else "revoked, dropped=%d" % dropped)
         return "all", {"action": act, "granted": g, "speech": sp}
 
     def build_document(self, room, appt):
@@ -1274,7 +1338,7 @@ class Handler(BaseHTTPRequestHandler):
                    "date": datetime.now().strftime("%Y-%m-%d"), "conclusion": concl}
         mid = DB.run("messages.add",
                      (appt["id"], now(), "doctor", "document", json.dumps(payload, ensure_ascii=False)))
-        audit("doctor", "conclusion_sent", room.code)
+        audit(self.who, "conclusion_sent", room.code)
         payload["mid"] = mid
         return payload
 
@@ -1295,6 +1359,7 @@ class Handler(BaseHTTPRequestHandler):
             raise ApiError(413, "too_large", "Файл больше 20 МБ")
         if not check_signature(ext, raw):
             raise ApiError(400, "bad_signature", "Содержимое не соответствует типу файла")
+        need_room_for(appt["id"], "file", len(raw))
         fid = DB.run("files.add",
                      (appt["id"], now(), who, name, FILE_TYPES[ext], len(raw)))
         rel = "files/%d.dat" % fid
@@ -1303,7 +1368,7 @@ class Handler(BaseHTTPRequestHandler):
         meta = {"id": fid, "name": name, "mime": FILE_TYPES[ext], "size": len(raw)}
         DB.run("messages.add",
                (appt["id"], now(), who, "file", json.dumps(meta, ensure_ascii=False)))
-        audit("doctor" if who == "doctor" else "patient", "file_upload", room.code, "id=%d size=%d" % (fid, len(raw)))
+        audit(self.who, "file_upload", room.code, "id=%d size=%d" % (fid, len(raw)))
         return meta
 
     def h_file_get(self, code, fid):
@@ -1311,6 +1376,7 @@ class Handler(BaseHTTPRequestHandler):
         row = DB.one("files.in_appointment", (fid, room.appt_id))
         if not row or not (DATA_DIR / row["path"]).is_file():
             raise ApiError(404, "not_found", "Файл не найден")
+        audit(self.who, "file_downloaded", room.code, "id=%d" % fid)
         q = urllib.parse.quote(row["name"])
         ext = os.path.splitext(row["name"])[1] or ".bin"
         self.reply(200, (DATA_DIR / row["path"]).read_bytes(), row["mime"],
@@ -1328,13 +1394,14 @@ class Handler(BaseHTTPRequestHandler):
         if len(raw) < 20 or raw[:3] != b"\xff\xd8\xff":
             raise ApiError(400, "bad_jpeg", "Ожидался JPEG")
         appt = appt_by_room(room)
+        need_room_for(appt["id"], "photo", len(raw))
         ts = now()
         pid = DB.run("photos.add",
                      (appt["id"], appt["patient_id"], pose, ts, len(raw)))
         rel = "photos/%d.jpg" % pid
         (DATA_DIR / rel).write_bytes(raw)
         DB.run("photos.set_path", (rel, pid))
-        audit("doctor" if role == "doctor" else "patient", "photo_saved", room.code, "id=%d pose=%s" % (pid, pose))
+        audit(self.who, "photo_saved", room.code, "id=%d pose=%s" % (pid, pose))
         with COND:
             if not room.closed:
                 add_event(room, "face", "server", "doctor", {"kind": "photo", "id": pid, "pose": pose, "ts": ts})
@@ -1353,6 +1420,7 @@ class Handler(BaseHTTPRequestHandler):
         и браузер печатает сам (запасной путь)."""
         room, role = self.need_room(code)
         b = self.read_json(1024 * 1024)
+        audit(self.who, "conclusion_printed", room.code)
         payload = {"center": clean_text(b.get("center"), 200), "doctor": clean_text(b.get("doctor"), 200),
                    "patient": clean_text(b.get("patient"), 200), "date": clean_text(b.get("date"), 40),
                    "conclusion": clean_conclusion(b.get("conclusion") or {})}
@@ -1406,6 +1474,8 @@ class Handler(BaseHTTPRequestHandler):
             raise ApiError(429, "rate_limited", "Слишком много кусков записи")
         appt = appt_by_room(room)
         sp = load_protocol_json(appt).get("speech") or {}
+        if room.ended or appt["status"] == "completed":
+            raise ApiError(409, "appointment_ended", "Приём завершён: запись речи не принимается")
         if not (sp.get("consent") and sp.get("active")):
             raise ApiError(403, "no_speech_consent", "Нет согласия пациента на расшифровку речи")
         mime = (self.headers.get("Content-Type") or "").split(";")[0].strip().lower()
@@ -1422,6 +1492,7 @@ class Handler(BaseHTTPRequestHandler):
         raw = self.read_raw(MAX_AUDIO)
         if len(raw) < 100:
             raise ApiError(400, "bad_audio", "Пустой кусок записи")
+        need_room_for(appt["id"], "audio", len(raw))
         key = role[0] + "-" + key  # ключи врача и пациента не пересекаются
         dup = DB.one("jobs.by_key", (appt["id"], key))
         if dup:
@@ -1466,6 +1537,7 @@ class Handler(BaseHTTPRequestHandler):
         rows = DB.q("jobs.transcribe_counts", (appt["id"],))
         cnt = {r["status"]: r["n"] for r in rows}
         st = {"chunks": sum(cnt.values()), "done": cnt.get("done", 0), "queued": cnt.get("queued", 0), "error": cnt.get("error", 0),
+              "cancelled": cnt.get("cancelled", 0),
               "speech": (load_protocol_json(appt).get("speech") or {}), "service_up": None}
         if service_enabled("speech"):
             st["service_up"] = (services_status()["services"].get("speech") or {}).get("up")
@@ -1473,9 +1545,12 @@ class Handler(BaseHTTPRequestHandler):
             return self.send_json(200, st)
         if what == "original":
             segs = DB.q("speech.segments", (appt["id"],))
-            audit("doctor", "transcript_original_viewed", room.code, "segments=%d" % len(segs))
+            audit(self.who, "transcript_original_viewed", room.code, "segments=%d" % len(segs))
             return self.send_json(200, {"status": st, "segments": merge_speakers(segs)})
-        self.send_json(200, {"status": st, "deid": transcript_view(appt["id"])})
+        view = transcript_view(appt["id"])
+        if view.get("segments"):  # вкладка опрашивает, пока идёт обезличивание; пишем только показ текста
+            audit(self.who, "transcript_viewed", room.code, "segments=%d" % len(view["segments"]))
+        self.send_json(200, {"status": st, "deid": view})
 
     def h_transcript_redo(self, code):
         room, role = self.need_room(code)
@@ -1490,7 +1565,7 @@ class Handler(BaseHTTPRequestHandler):
             return self.send_json(503, {"error": "service_unavailable", "service": "assistant", "degraded": True,
                                         "message": "Сервис обезличивания не подключён"}, {"Retry-After": "30"})
         enqueue_deid(appt["id"])
-        audit("doctor", "transcript_deidentify_requested", room.code)
+        audit(self.who, "transcript_deidentify_requested", room.code)
         self.send_json(202, {"deid": transcript_view(appt["id"])})
 
     def h_transcript_edit(self, code):
@@ -1508,7 +1583,7 @@ class Handler(BaseHTTPRequestHandler):
                 raise ApiError(409, "not_ready", "Обезличенной расшифровки ещё нет")
             if op in ("confirm", "unconfirm"):
                 DB.run("transcripts.set_confirmed", (1 if op == "confirm" else 0, now(), appt["id"]))
-                audit("doctor", "transcript_" + op + "ed", room.code)
+                audit(self.who, "transcript_" + op + "ed", room.code)
                 return self.send_json(200, {"deid": transcript_view(appt["id"])})
             if not row["mapping"]:
                 raise ApiError(410, "original_expired", "Срок хранения исходника истёк: правки недоступны")
@@ -1565,7 +1640,7 @@ class Handler(BaseHTTPRequestHandler):
             deid = [{"role": g["role"], "t": g["t"], "text": parts_text(g["parts"])} for g in mp["segments"]]
             DB.run("transcripts.edit",
                    (json.dumps(deid, ensure_ascii=False), json.dumps(mp, ensure_ascii=False), now(), appt["id"]))
-        audit("doctor", "transcript_replacement_" + ("undone" if op == "undo" else "added"), room.code, detail)
+        audit(self.who, "transcript_replacement_" + ("undone" if op == "undo" else "added"), room.code, detail)
         self.send_json(200, {"deid": transcript_view(appt["id"])})
 
     def h_job_get(self, code, jid):
@@ -1585,6 +1660,7 @@ class Handler(BaseHTTPRequestHandler):
                                         "speech": proto.get("speech") or {}})
         note = DB.one("notes.get", (appt["id"],))
         concl = DB.one("conclusions.get", (appt["id"],))
+        audit(self.who, "protocol_viewed", room.code)  # карточка, заметки, заключение
         self.send_json(200, {"appointment": self.meta(appt), "status": appt["status"], "location": proto.get("location") or {},
                              "face": face, "speech": proto.get("speech") or {}, "card": patient_card(appt["patient_id"]),
                              "notes": (note or {}).get("body", ""),
@@ -1623,11 +1699,27 @@ class Handler(BaseHTTPRequestHandler):
         if concl is not None:
             DB.run("conclusions.save",
                    (appt["id"], json.dumps(concl, ensure_ascii=False), now()))
-            audit("doctor", "conclusion_saved", room.code)
+            audit(self.who, "conclusion_saved", room.code)
         self.send_json(200, {"status": "saved"})
+
+    def verified_measurement(self, appt, kind, b):
+        """Если метрики посчитал vision (job_id задания этого приёма), сохраняются числа из задания, а не из браузера:
+        verified=true. Иначе это расчёт на устройстве, verified=false."""
+        jid = b.get("job_id")
+        job = DB.one("jobs.in_appointment", (int(jid), appt["id"])) if isinstance(jid, int) else None
+        if not job or job["status"] != "done" or job["kind"] != kind or not job["result"]:
+            return dict(b, verified=False)
+        res = json.loads(job["result"])
+        if res.get("pose_ok") is not True:
+            raise ApiError(400, "pose_out_of_tolerance", "Поза вне допуска: значения не сохраняются")
+        out = dict(b)
+        out.update(res)
+        return dict(out, verified=True, job_id=job["id"], submitted_by=b["submitted_by"])
 
     def h_meas_post(self, code):
         room, role = self.need_room(code)
+        if not room.bucket(role, "main").take(2):
+            raise ApiError(429, "rate_limited", "Слишком много измерений")
         b = self.read_json(2 * 1024 * 1024)
         kind = clean_text(b.get("kind"), 20)
         if kind not in ("symmetry", "mobility", "compare", "calibration", "report"):
@@ -1638,9 +1730,16 @@ class Handler(BaseHTTPRequestHandler):
         if has_mm_keys(b) and not (isinstance(cal, dict) and cal.get("source")):
             raise ApiError(400, "calibration_required", "Значения в мм без калибровки не сохраняются")
         appt = appt_by_room(room)
+        need_room_for(appt["id"], "measurement")
+        b = dict(b, submitted_by=self.who)  # кто прислал: врач или устройство пациента
+        if kind in ("symmetry", "mobility", "compare"):
+            b = self.verified_measurement(appt, kind, b)
+        if kind == "report" and isinstance(b.get("transcript"), dict):
+            # текст расшифровки в отчёт не копируем: он живёт в transcripts со своим сроком хранения и правками врача
+            b = dict(b, transcript={"included": True, "segments": len(b["transcript"].get("segments") or [])})
         DB.run("measurements.add",
                (appt["id"], appt["patient_id"], kind, now(), json.dumps(b, ensure_ascii=False)))
-        audit("doctor" if role == "doctor" else "patient", "measurements_saved", room.code, kind)
+        audit(self.who, "measurements_saved", room.code, kind)
         self.send_json(200, {"status": "stored", "kind": kind})
 
 
@@ -1697,6 +1796,33 @@ JOB_SERVICES = {
 JOB_EVTS = {n: threading.Event() for n in JOB_SERVICES}
 JOB_KEEP = 86400  # входные данные (точки лица, куски аудио) хранятся не дольше суток
 TRANSCRIPT_DAYS = int(os.environ.get("TRANSCRIPT_DAYS", "30"))  # срок хранения исходной расшифровки
+# Лимиты на один приём и свободное место: место пациента занимает тот, кто первым вошёл по коду,
+# и без лимитов он мог бы заполнить диск файлами, снимками, измерениями и кусками речи.
+APPT_FILES_MB = int(os.environ.get("APPT_FILES_MB", "200"))
+APPT_PHOTOS = int(os.environ.get("APPT_PHOTOS", "300"))
+APPT_MEASUREMENTS = int(os.environ.get("APPT_MEASUREMENTS", "500"))
+APPT_QUEUED_AUDIO = int(os.environ.get("APPT_QUEUED_AUDIO", "720"))  # 2 часа речи по 10 с
+MIN_FREE_MB = int(os.environ.get("MIN_FREE_MB", "500"))
+
+
+def need_room_for(appt_id, kind, size=0):
+    """413, если превышен лимит приёма; 507, если на диске меньше MIN_FREE_MB."""
+    if shutil.disk_usage(str(DATA_DIR)).free - size < MIN_FREE_MB * 1024 * 1024:
+        log.warning("мало места на диске: загрузка %s отклонена", kind)
+        raise ApiError(507, "disk_full", "На сервере закончилось место. Сообщите администратору")
+    if kind == "file":
+        u = DB.one("files.appt_usage", (appt_id,))
+        over = u["bytes"] + size > APPT_FILES_MB * 1024 * 1024
+    elif kind == "photo":
+        over = DB.one("photos.appt_count", (appt_id,))["n"] >= APPT_PHOTOS
+    elif kind == "measurement":
+        over = DB.one("measurements.appt_count", (appt_id,))["n"] >= APPT_MEASUREMENTS
+    else:
+        over = DB.one("jobs.queued_audio", (appt_id,))["n"] >= APPT_QUEUED_AUDIO
+    if over:
+        raise ApiError(413, "appointment_quota", "Достигнут лимит загрузок для этого приёма")
+
+
 AUDIO_MIME = {"audio/webm": ".webm", "audio/ogg": ".ogg", "audio/mp4": ".m4a", "audio/mpeg": ".mp3", "audio/wav": ".wav"}
 MAX_AUDIO = 2 * 1024 * 1024
 
@@ -1812,6 +1938,24 @@ def transcript_view(appt_id):
     return out
 
 
+def cancel_queued_speech(appt_id, reason):
+    """Куски речи, ещё не расшифрованные, удаляются вместе с аудио. Возвращает их число."""
+    n, t = 0, now()
+    err = json.dumps({"error": reason, "service": "speech", "message": "Отменено: пациент отозвал согласие"}, ensure_ascii=False)
+    for job in DB.q("jobs.queued_transcribe", (appt_id,)):
+        drop_audio(json.loads(job["input"]))
+        DB.run("jobs.cancel", (t, err, job["id"]))
+        n += 1
+    return n
+
+
+def finish_speech(appt):
+    """Конец приёма (обычный или экстренный): запись выключается, расшифровка уходит на обезличивание."""
+    set_speech(appt, active=False)
+    if service_enabled("assistant") and DB.one("jobs.any_transcribe", (appt["id"],)):
+        enqueue_deid(appt["id"])
+
+
 def enqueue_deid(appt_id):
     """Обезличивание после «Завершить приём» или по кнопке «Обезличить повторно».
     Прежний обезличенный текст виден, пока не готов новый; подтверждение снимается."""
@@ -1891,10 +2035,20 @@ def jobs_loop(stop_evt, svc):
 
 
 def jobs_cleanup():
-    old = now() - JOB_KEEP
-    for job in DB.q("jobs.old_transcribe_inputs", (old,)):
-        drop_audio(json.loads(job["input"]))
-    DB.run("jobs.delete_old", (old,))
+    """Невыполненное за JOB_KEEP задание не удаляется молча: помечается ошибкой, входные данные (аудио, точки лица)
+    стираются, а врач видит пробел. Обезличивание, которое так и не выполнилось, переводит расшифровку в «ошибку»,
+    чтобы врач нажал «Обезличить повторно», а не ждал вечно. Завершённые задания удаляются через JOB_KEEP."""
+    old, t = now() - JOB_KEEP, now()
+    for job in DB.q("jobs.old_queued", (old,)):
+        if job["kind"] == "transcribe":
+            drop_audio(json.loads(job["input"]))
+        svc = job_service(job["kind"])
+        err = json.dumps({"error": "expired", "service": svc,
+                          "message": "Не выполнено за сутки: сервис %s был недоступен" % svc}, ensure_ascii=False)
+        DB.run("jobs.expire", (t, err, job["id"]))
+        if job["kind"] == "deidentify":
+            DB.run("transcripts.fail", (err, t, job["appt_id"]))
+    DB.run("jobs.delete_finished_old", (old,))
     DB.run("speech.delete_old", (now() - TRANSCRIPT_DAYS * 86400,))
     # исходник живёт в соответствии замен: по сроку хранения оно удаляется, обезличенный текст остаётся
     DB.run("transcripts.drop_old_originals", (now() - TRANSCRIPT_DAYS * 86400,))
@@ -1940,8 +2094,13 @@ def in_jupyter():
 def main():
     global DB, _MARS_RUNNING
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+    os.umask(0o077)  # файлы пациентов: только владелец (0600), в том числе в одиночном режиме
     for sub in ("", "files", "photos", "vendor", "audio"):
         (DATA_DIR / sub).mkdir(parents=True, exist_ok=True)
+    try:
+        os.chmod(DATA_DIR, 0o700)
+    except OSError:
+        pass
     try:
         DB = open_db()
     except DatabaseUnavailable:
@@ -3243,7 +3402,7 @@ const Print = {
     const c = d.conclusion || {}, row = (t, v) => [h('h2', { text: t }), h('p', { style: 'white-space:pre-wrap', text: v || '-' })];
     this.go(h('div', null, h('h1', { text: d.center || Cfg.center }), h('h2', { text: 'Заключение консультации' }),
       h('table', null, h('tr', null, h('th', { text: 'Пациент' }), h('td', { text: d.patient || '' })), h('tr', null, h('th', { text: 'Дата' }), h('td', { text: d.date || '' })), h('tr', null, h('th', { text: 'Врач' }), h('td', { text: d.doctor || '' }))),
-      row('Жалобы', c.complaints), row('Анамнез', c.anamnesis), row('Диагноз', (c.diagnosis || '') + (c.icd ? ' (МКБ-10: ' + c.icd + ')' : '')), row('Рекомендации', c.recommendations),
+      row('Жалобы', c.complaints), row('Анамнез', c.anamnesis), row('Диагноз', c.diagnosis), row('Код МКБ-10', c.icd), row('Рекомендации', c.recommendations),
       row('Повторный контакт', c.followup),
       h('p', { class: 'sm', text: 'Документ сформирован по результатам дистанционной консультации. Это заключение консультации, а не электронный рецепт.' }),
       h('div', { class: 'sign', text: 'Подпись врача ______________________ / ' + (d.doctor || '') + ' /' })));
@@ -3485,7 +3644,7 @@ FaceMesh.Remote = {
       await new Promise(r => setTimeout(r, 400));
       job = await Api.get('/rooms/' + Api.room + '/jobs/' + job.id, { signal }).catch(e => { if (e && e.name === 'AbortError') throw e; return job; });
     }
-    if (job.status === 'done') return job.result;
+    if (job.status === 'done') return Object.assign({}, job.result, { job_id: job.id });  /* по номеру задания сервер сохранит числа vision, а не браузера */
     throw new Error((job.error && job.error.message) || 'Ошибка анализа');
   },
   async pick(kind, input, local, signal, downMsg) {
@@ -3644,7 +3803,17 @@ FaceMesh.Pose = {
     else if (aMax > tol) { hint = 'Выровняйте голову'; level = 'medium'; }
     return Object.assign({ level, hint, tol, size: g.size, cx: g.cx, cy: g.cy, t: performance.now() }, e, st ? { mean: st.mean, over: st.over, sharp: st.sharp, bg: st.bg } : {});
   },
-  inTol(e, tol) { return !!e && Math.abs(e.yaw) <= tol && Math.abs(e.pitch) <= tol && Math.abs(e.roll) <= tol; }
+  inTol(e, tol) { return !!e && Math.abs(e.yaw) <= tol && Math.abs(e.pitch) <= tol && Math.abs(e.roll) <= tol; },
+  /* углы для отдельного снимка: знак yaw уточняется по положению носа на этом же снимке, без накопленного состояния.
+     Так же считает vision (metrics.euler), поэтому проверка позы при сравнении совпадает в браузере и на сервере */
+  eulerStill(cur) {
+    if (!cur || !cur.mat) return null;
+    const R = this.rot(cur.mat);
+    let yaw = deg(Math.atan2(R[0][2], R[2][2])); const pitch = deg(Math.asin(clamp(-R[1][2], -1, 1))), roll = deg(Math.atan2(R[1][0], R[1][1]));
+    const lm = cur.lm, a = lm[LM.REO], b = lm[LM.LEO], n = lm[LM.NOSE];
+    if (a && b && n) { const wid = b.x - a.x; if (Math.abs(wid) > 1e-3) { const yl = (n.x - (a.x + b.x) / 2) / wid; if (Math.abs(yl) > 0.12 && Math.abs(yaw) > 10 && Math.sign(yl) !== Math.sign(yaw)) yaw = -yaw; } }
+    return { yaw, pitch, roll };
+  }
 };
 
 /* --- Overlay: сетка и контуры, HiDPI, зеркало --- */
@@ -4581,7 +4750,8 @@ FaceMesh.Compare = {
   /* расчёт сравнения по точкам двух снимков; тот же результат отдаёт сервис vision (/v1/compare) */
   calc(A, B, pose, tol, cal) {
     const F = FaceMesh, tgt = POSE_YAW[pose], mm = pose === 'frontal' && cal && cal.ipd_mm ? cal : null;
-    const chk = X => { const e = F.Pose.euler(X); if (!e) return { ok: false, e: null }; const dy = pose === 'frontal' ? Math.abs(e.yaw) : Math.abs(Math.abs(e.yaw) - Math.abs(tgt)); return { ok: dy <= tol && Math.abs(e.pitch) <= tol && Math.abs(e.roll) <= tol, e }; };
+    /* с учётом направления поворота: снимок «влево 45°», снятый вправо, не проходит */
+    const chk = X => { const e = F.Pose.eulerStill(X); if (!e) return { ok: false, e: null }; const dy = Math.abs(e.yaw - tgt); return { ok: dy <= tol && Math.abs(e.pitch) <= tol && Math.abs(e.roll) <= tol, e }; };
     const ca = chk(A), cb = chk(B), poseOk = ca.ok && cb.ok && !!A.mat && !!B.mat;
     const T = this.procrustes(A, B);
     /* нормировка: по МЗР для анфаса, по высоте лица для остальных ракурсов */
@@ -4636,7 +4806,7 @@ FaceMesh.Compare = {
     const msg = h('div', { class: 'stack' }, warn.map(w => h('div', { class: 'banner warn', style: 'border-radius:10px', text: w })));
     const saveBtn = h('button', { class: 'btn pri', disabled: !poseOk || null, onclick: async e => {
       e.target.disabled = true;
-      const payload = { kind: 'compare', pose_ok: true, source: R.source, pose, before_id: before.id, after_id: after.id, before_ts: before.ts, after_ts: after.ts, norm: normName, scale: T.scale, rotation_deg: T.angle, tolerance: tol, rows: rows.map(r => { const o = { id: r.id, label: r.label, dx: r.dx, dy: r.dy }; if (mm) { o.dx_mm = r.dx_mm; o.dy_mm = r.dy_mm; } return o; }), ts: Math.floor(Date.now() / 1000) };
+      const payload = { kind: 'compare', pose_ok: true, source: R.source, job_id: R.job_id, pose, before_id: before.id, after_id: after.id, before_ts: before.ts, after_ts: after.ts, norm: normName, scale: T.scale, rotation_deg: T.angle, tolerance: tol, rows: rows.map(r => { const o = { id: r.id, label: r.label, dx: r.dx, dy: r.dy }; if (mm) { o.dx_mm = r.dx_mm; o.dy_mm = r.dy_mm; } return o; }), ts: Math.floor(Date.now() / 1000) };
       if (mm) payload.calibration = mm;
       try { await Api.post('/rooms/' + Api.room + '/measurements', payload); F.hist = null; Toast.show('Сравнение сохранено в протокол'); } catch (er) { Toast.err(er); e.target.disabled = false; }
     } }, 'Сохранить в протокол');
@@ -4909,6 +5079,7 @@ const Transcript = {
     if (d.status === 'none') kids.push(h('p', { style: 'margin:0', text: 'Обезличенной расшифровки пока нет. Она появится после завершения приёма, если пациент дал согласие на расшифровку речи.' }), live ? h('p', { class: 'note', style: 'margin:0', text: live }) : null);
     if (d.status === 'queued') kids.push(h('div', { class: 'banner', style: 'border-radius:10px', role: 'status', text: d.waiting ? 'Сервис обезличивания временно недоступен. Расшифровка сохранена и будет обезличена, когда сервис заработает.' : 'Идёт обезличивание расшифровки. На процессоре это может занять несколько минут.' }));
     if (d.status === 'error') kids.push(h('div', { class: 'banner bad', style: 'border-radius:10px', text: 'Не удалось обезличить: ' + ((d.error && d.error.message) || 'ошибка') + '.' }));
+    if (st && (st.error || st.cancelled)) kids.push(h('div', { class: 'banner warn', style: 'border-radius:10px', text: 'Расшифровка неполная: ' + (st.error ? 'не удалось расшифровать кусков записи — ' + st.error : '') + (st.error && st.cancelled ? '; ' : '') + (st.cancelled ? 'удалено после отзыва согласия — ' + st.cancelled : '') + '.' }));
     const btns = [];
     if (d.status === 'done') {
       kids.push(h('div', { class: 'row wrap', style: 'gap:8px' }, d.confirmed ? h('span', { class: 'chip g', text: 'Проверено врачом, идёт в отчёт' }) : h('span', { class: 'chip o', text: 'Не проверено: в отчёт не попадает' }),

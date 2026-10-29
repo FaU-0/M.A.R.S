@@ -308,7 +308,8 @@ def compare(before, after, pose="frontal", tol=5.0, cal=None):
         e = euler(X)
         if not e:
             return {"ok": False, "e": None}
-        dy = abs(e["yaw"]) if pose == "frontal" else abs(abs(e["yaw"]) - abs(tgt))
+        # с учётом направления: снимок «влево 45°», снятый вправо, не проходит (иначе стороны лица перепутаются)
+        dy = abs(e["yaw"] - tgt)
         return {"ok": dy <= tol and abs(e["pitch"]) <= tol and abs(e["roll"]) <= tol, "e": e}
 
     ca, cb = chk(A), chk(B)
@@ -358,9 +359,12 @@ def ipd_px(f):
     return v["ipd"] if v else None
 
 
-def calibrate_iris(frame_list):
+def calibrate_iris(frame_list, tol=5.0):
+    """Масштаб по радужке. Как в браузере: только кадры с позой в допуске, иначе радужка и МЗР искажены поворотом."""
     S = []
     for f in frames(frame_list):
+        if not in_tol(euler(f), tol):
+            continue
         iris, ipd = iris_px(f), ipd_px(f)
         if iris and ipd:
             S.append({"iris": iris, "ipd": ipd})

@@ -58,8 +58,15 @@ QUERIES = {
     "files.add": ("run", "INSERT INTO files(appt_id,ts,sender,name,mime,size) VALUES(?,?,?,?,?,?)"),
     "files.set_path": ("run", "UPDATE files SET path=? WHERE id=?"),
     "files.in_appointment": ("one", "SELECT * FROM files WHERE id=? AND appt_id=?"),
+    # лимиты на приём: кто занял место пациента, не должен заполнить диск
+    "files.appt_usage": ("one", "SELECT COUNT(*) AS n, COALESCE(SUM(size),0) AS bytes FROM files WHERE appt_id=?"),
+    "photos.appt_count": ("one", "SELECT COUNT(*) AS n FROM photos WHERE appt_id=?"),
+    "measurements.appt_count": ("one", "SELECT COUNT(*) AS n FROM measurements WHERE appt_id=?"),
     "photos.add": ("run", "INSERT INTO photos(appt_id,patient_id,pose,ts,size) VALUES(?,?,?,?,?)"),
     "photos.set_path": ("run", "UPDATE photos SET path=? WHERE id=?"),
+    # снимки и измерения, сделанные до создания карточки, привязываются к пациенту, когда карточка появилась
+    "photos.attach_patient": ("run", "UPDATE photos SET patient_id=? WHERE appt_id=? AND patient_id IS NULL"),
+    "measurements.attach_patient": ("run", "UPDATE measurements SET patient_id=? WHERE appt_id=? AND patient_id IS NULL"),
     "photos.by_id": ("one", "SELECT * FROM photos WHERE id=?"),
     "photos.of_patient": ("list", "SELECT id, appt_id, pose, ts, size FROM photos WHERE patient_id=? ORDER BY ts DESC LIMIT 500"),
     "measurements.add": ("run", "INSERT INTO measurements(appt_id,patient_id,kind,ts,body) VALUES(?,?,?,?,?)"),
@@ -84,8 +91,13 @@ QUERIES = {
     "jobs.give_up": ("run", "UPDATE jobs SET status='error', attempts=?, updated=?, error=? WHERE id=?"),
     "jobs.fail": ("run", "UPDATE jobs SET status='error', updated=?, error=? WHERE id=?"),
     "jobs.finish": ("run", "UPDATE jobs SET status='done', updated=?, result=?, error=NULL WHERE id=?"),
-    "jobs.old_transcribe_inputs": ("list", "SELECT input FROM jobs WHERE created<? AND kind='transcribe'"),
-    "jobs.delete_old": ("run", "DELETE FROM jobs WHERE created<?"),
+    # старые задания: невыполненные не удаляются молча, а помечаются ошибкой (врач видит пробел), входные данные стираются
+    "jobs.old_queued": ("list", "SELECT id, appt_id, kind, input FROM jobs WHERE status='queued' AND created<?"),
+    "jobs.expire": ("run", "UPDATE jobs SET status='error', updated=?, error=?, input='{}' WHERE id=?"),
+    "jobs.delete_finished_old": ("run", "DELETE FROM jobs WHERE status<>'queued' AND updated<?"),
+    "jobs.queued_audio": ("one", "SELECT COUNT(*) AS n FROM jobs WHERE appt_id=? AND kind='transcribe' AND status='queued'"),
+    "jobs.queued_transcribe": ("list", "SELECT id, input FROM jobs WHERE appt_id=? AND kind='transcribe' AND status='queued'"),
+    "jobs.cancel": ("run", "UPDATE jobs SET status='cancelled', updated=?, error=? WHERE id=?"),
 
     # расшифровка речи и обезличивание
     "speech.add_segment": ("run", "INSERT INTO speech_segments(appt_id,role,chunk_t,seq,start,end,text,created) VALUES(?,?,?,?,?,?,?,?)"),
@@ -115,13 +127,13 @@ def _patient_update(conn, pid, fields):
 
 
 def _appointments_between(conn, t_from, t_to, doctor_id=None):
-    """Приёмы за период; doctor_id: только свои и неназначенные (для не-администратора)."""
+    """Приёмы за период; doctor_id: только свои (для не-администратора). Неназначенные видит и раздаёт администратор."""
     sql = ("SELECT a.*, p.full_name AS patient_name, p.email AS patient_email, d.name AS doctor_name FROM appointments a "
            "LEFT JOIN patients p ON p.id=a.patient_id LEFT JOIN doctors d ON d.id=a.doctor_id "
            "WHERE a.scheduled BETWEEN ? AND ?")
     args = [t_from, t_to]
     if doctor_id is not None:
-        sql += " AND (a.doctor_id=? OR a.doctor_id IS NULL)"
+        sql += " AND a.doctor_id=?"
         args.append(doctor_id)
     sql += " ORDER BY a.scheduled LIMIT 500"
     return [dict(r) for r in conn.execute(sql, args).fetchall()]
