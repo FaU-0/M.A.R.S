@@ -168,6 +168,7 @@ Object.assign(FaceMesh, {
     if (this.role !== 'doctor') return;
     if (d.kind === 'calibration') { this.cal = d.calibration; Toast.show('Получена калибровка размеров'); }
     else if (d.kind === 'symmetry' || d.kind === 'mobility') { this.latest[d.kind] = d; Toast.show(d.kind === 'symmetry' ? 'Получены метрики симметрии' : 'Получены результаты подвижности'); this.hist = null; }
+    if (d.kind === 'symmetry') this.repNext(d);
     this.renderDoctor();
   },
   patientRequest(d) {
@@ -452,8 +453,41 @@ Object.assign(FaceMesh, {
     if (L.symmetry) body.append(h('h3', { text: 'Симметрия' }), this.symDoses(L.symmetry), this.fold('Все значения симметрии', this.symTable(L.symmetry)));
     else body.append(h('p', { class: 'note', style: 'margin:0', text: 'Метрик симметрии в этом приёме пока нет.' }));
     if (L.mobility) body.append(h('h3', { text: 'Подвижность' }), this.mobDoses(L.mobility), this.fold('Все значения подвижности', this.mobTable(L.mobility)));
+    body.append(this.repBlock());
     const chartBox = h('div', { class: 'stack' }); body.append(h('h3', { text: 'Динамика между приёмами' }), chartBox);
     this.loadHistory().then(hist => this.drawTrends(chartBox, hist)).catch(e => chartBox.replaceChildren(h('p', { class: 'note', text: e.message })));
+  },
+  /* --- проверка повторяемости: серия замеров симметрии подряд --- */
+  repNext(d) {
+    const R = this.repRun; if (!R || R.done) return;
+    R.items.push(d);
+    if (R.items.length >= R.target) { R.done = true; Toast.show('Серия завершена: ' + R.items.length + ' замеров'); return; }
+    Toast.show('Замер ' + R.items.length + ' из ' + R.target + '. Попросите пациента отвернуться и снова сесть прямо');
+    clearTimeout(R.timer); R.timer = setTimeout(() => { if (this.repRun === R && !R.done) this.req('symmetry'); }, 2500);
+  },
+  repStart(target) { if (!this.consent) { this.req('symmetry'); return; } this.repRun = { target, items: [], done: false, timer: 0 }; this.req('symmetry'); this.renderDoctor(); },
+  repStop() { if (this.repRun) clearTimeout(this.repRun.timer); this.repRun = null; this.renderDoctor(); },
+  repBlock() {
+    const R = this.repRun;
+    if (!R) {
+      let n = 5;
+      return this.fold('Проверка повторяемости',
+        h('p', { class: 'note', style: 'margin:0', text: 'Несколько замеров симметрии подряд у одного человека. Показывает разброс самого измерения и минимальное изменение, которое можно отличить от этого разброса. Между замерами пациент отворачивается и снова садится прямо.' }),
+        Ui.segmented([['3', '3 замера'], ['5', '5'], ['10', '10']], String(n), v => { n = +v; }, 'Число замеров'),
+        h('button', { class: 'btn sec', style: 'align-self:flex-start', disabled: !this.consent || null, onclick: () => this.repStart(n) }, 'Начать серию'));
+    }
+    if (!R.done) return h('div', { class: 'steps', role: 'status', 'aria-live': 'polite' }, h('h3', { text: 'Проверка повторяемости' }),
+      h('p', { style: 'margin:8px 0', text: 'Получено замеров: ' + R.items.length + ' из ' + R.target + '. Следующий запрос уйдёт пациенту автоматически.' }),
+      h('div', { class: 'meter' }, h('i', { style: 'width:' + Math.round(R.items.length / R.target * 100) + '%' })),
+      h('button', { class: 'btn txt', style: 'margin-top:8px;padding:0', onclick: () => this.repStop() }, 'Остановить серию'));
+    const st = this.Repeat.stats(R.items), d = st.mm ? 2 : 3, u = st.mm ? ' мм' : '', f = v => v == null ? '-' : fx(v, d).replace('.', ',');
+    return h('div', { class: 'steps' }, h('h3', { text: 'Повторяемость: ' + st.n + ' замеров' }),
+      h('table', { class: 'tb', style: 'margin-top:8px' }, h('tr', null, h('th', { text: 'Метрика' }), h('th', { class: 'n', text: 'Разность: среднее ± SD' }), h('th', { class: 'n', text: 'MDC95' })),
+        st.rows.map(r => h('tr', null, h('td', { text: r.label }), h('td', { class: 'n', text: f(r.diff.mean) + ' ± ' + f(r.diff.sd) + u }), h('td', { class: 'n', text: f(r.diff.mdc) + u })))),
+      h('p', { class: 'note', style: 'margin:8px 0 0', text: 'SD — разброс замеров у одного человека. MDC95 — минимальное различимое изменение: если между приёмами разность изменилась меньше, это не отличить от разброса измерения. ' + (st.mm ? 'Все замеры откалиброваны, значения в миллиметрах.' : 'Значения в долях МЗР: для миллиметров нужна калибровка перед серией.') }),
+      h('div', { class: 'row wrap', style: 'margin-top:8px' },
+        h('button', { class: 'btn sec', onclick: () => Ui.download('повторяемость-' + new Date().toISOString().slice(0, 10) + '.csv', '\ufeff' + this.Repeat.csv(R.items), 'text/csv') }, icon('download'), 'Таблица (CSV)'),
+        h('button', { class: 'btn txt', onclick: () => this.repStop() }, 'Новая серия')));
   },
   /* порядок документирования лица для врача, который делает это впервые */
   firstSteps() {

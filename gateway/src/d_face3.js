@@ -365,3 +365,37 @@ FaceMesh.Report = {
         h('button', { class: 'btn sec', onclick: async e => { e.target.disabled = true; try { await Api.post('/rooms/' + Api.room + '/measurements', rep); Toast.show('Отчёт сохранён в протокол'); } catch (er) { Toast.err(er); } e.target.disabled = false; } }, 'Сохранить в протокол')));
   }
 };
+
+/* ===== Face Mesh: проверка повторяемости серии замеров симметрии ===== */
+FaceMesh.Repeat = {
+  /* MDC95 = 1,96·√2·SD: изменение меньше этого между двумя приёмами не отличить от разброса самих замеров */
+  K_MDC: 1.96 * Math.SQRT2,
+  /* миллиметры, только если откалиброван каждый замер серии */
+  usesMm(list) { return list.length > 0 && list.every(m => m.calibration && m.calibration.ipd_mm); },
+  summary(vals) {
+    const n = vals.length, mean = vals.reduce((a, b) => a + b, 0) / n;
+    if (n < 2) return { mean, sd: null, mdc: null };
+    const sd = Math.sqrt(vals.reduce((a, v) => a + (v - mean) ** 2, 0) / (n - 1));
+    return { mean, sd, mdc: this.K_MDC * sd };
+  },
+  stats(list) {
+    const mm = this.usesMm(list), key = f => mm ? f + '_mm' : f, ids = [];
+    for (const m of list) for (const r of m.rows || []) if (!ids.find(x => x.id === r.id)) ids.push({ id: r.id, label: r.label });
+    const rows = ids.map(({ id, label }) => {
+      const rs = list.map(m => (m.rows || []).find(r => r.id === id)).filter(Boolean);
+      const col = f => rs.map(r => r[key(f)]).filter(v => v != null && isFinite(v));
+      return { id, label, n: rs.length, diff: this.summary(col('diff')), right: this.summary(col('right')), left: this.summary(col('left')) };
+    });
+    return { n: list.length, mm, rows };
+  },
+  /* таблица для отчёта: разделитель «;» и десятичная запятая открываются в русском Excel */
+  csv(list) {
+    const s = this.stats(list), k = s.mm ? '_mm' : '', d = s.mm ? 2 : 4;
+    const num = v => v == null || !isFinite(v) ? '' : v.toFixed(d).replace('.', ',');
+    const out = ['замер;метрика;правая;левая;разность;единицы'];
+    list.forEach((m, i) => (m.rows || []).forEach(r => out.push([i + 1, r.label, num(r['right' + k]), num(r['left' + k]), num(r['diff' + k]), s.mm ? 'мм' : 'доли МЗР'].join(';'))));
+    out.push('', 'итог;метрика;разность: среднее;разность: SD;минимальное различимое изменение (MDC95);замеров');
+    s.rows.forEach(r => out.push(['итог', r.label, num(r.diff.mean), num(r.diff.sd), num(r.diff.mdc), r.n].join(';')));
+    return out.join('\n') + '\n';
+  }
+};
