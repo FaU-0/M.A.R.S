@@ -347,7 +347,7 @@ const Poller = {
 };
 
 /* ===== Пациент: код, согласие, проверка оборудования, ожидание ===== */
-const CONSENT_TEXT = 'Я даю согласие на проведение консультации в дистанционной форме (видеосвязь) и на обработку моих персональных данных в объёме, необходимом для оказания медицинской помощи. Я понимаю, что дистанционная консультация не заменяет очный осмотр. Текст согласия задаётся центром.'; // шаблон заменяется юристом центра
+const CONSENT_TEXT = 'Я даю согласие на проведение консультации в дистанционной форме (видеосвязь) и на обработку моих персональных данных в объёме, необходимом для оказания медицинской помощи. Я понимаю, что дистанционная консультация не заменяет очный осмотр.'; // шаблон: юрист центра заменяет текст перед пилотом
 const Session = {
   code: null, hb: null,
   key() { return 'mars_pt_' + this.code; },
@@ -372,7 +372,7 @@ const Session = {
     this.showConsent(info);
   },
   showConsent(info) {
-    const cb = h('input', { type: 'checkbox', id: 'consent', style: 'width:24px;height:24px;flex:none' });
+    const cb = h('input', { type: 'checkbox', id: 'consent', 'aria-describedby': 'consent-text' });
     const btn = h('button', { class: 'btn pri lg', disabled: true, onclick: () => this.join(true) }, 'Продолжить');
     cb.addEventListener('change', () => { btn.disabled = !cb.checked; });
     $('#main').replaceChildren(h('div', { class: 'page' }, h('div', { class: 'stack' },
@@ -381,9 +381,9 @@ const Session = {
       h('div', { class: 'list' },
         h('div', { class: 'li' }, icon('user'), h('div', { class: 'grow' }, h('div', { class: 'sm mut', text: 'Врач' }), h('div', { text: info.doctor || 'Врач центра' }))),
         h('div', { class: 'li' }, icon('calendar'), h('div', { class: 'grow' }, h('div', { class: 'sm mut', text: 'Время' }), h('div', { text: fmtDT(info.scheduled) })))),
-      h('h3', { text: 'Согласие' }),
-      h('p', { style: 'margin:0', text: CONSENT_TEXT }),
-      h('label', { class: 'row', for: 'consent', style: 'min-height:44px;gap:12px' }, cb, h('span', { text: 'Я согласен(на) на дистанционную консультацию и обработку персональных данных' })),
+      h('h2', { class: 'consent-h', text: 'Согласие' }),
+      h('p', { id: 'consent-text', class: 'consent-text', text: CONSENT_TEXT }),
+      h('label', { class: 'consent-row', for: 'consent' }, cb, h('span', { text: 'Я согласен(на) на дистанционную консультацию и обработку персональных данных' })),
       btn)));
   },
   async join(withConsent) {

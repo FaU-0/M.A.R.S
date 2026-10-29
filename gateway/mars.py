@@ -2280,6 +2280,12 @@ html.hc .cb::after{font-size:13px}
 @media (prefers-color-scheme:dark){html.hc{--fg2:#d1d1d6;--acct:#8CC4FF}}
 .stack>.bigtoggle{align-self:flex-start}
 .bigtoggle[aria-pressed=true]{background:var(--acc);color:#fff}
+.consent-h{margin:12px 0 0;font-size:calc(var(--fs) * 1.35)}
+.consent-text{margin:0;max-width:65ch;line-height:1.5}
+.consent-row{display:flex;align-items:flex-start;gap:14px;padding:16px;min-height:56px;border:2px solid var(--sep);border-radius:var(--r2);background:var(--bg3);cursor:pointer;line-height:1.4}
+.consent-row input{width:28px;height:28px;flex:none;margin:0;accent-color:var(--acc);cursor:pointer}
+.consent-row:has(input:checked){border-color:var(--acc);background:color-mix(in srgb,var(--acc) 8%,var(--bg3))}
+.consent-row:has(input:focus-visible){outline:2px solid var(--acc);outline-offset:2px}
 .vmsg{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;text-align:center;padding:24px;z-index:2;font-size:17px}
 .hint{position:absolute;left:12px;right:12px;bottom:84px;z-index:7;text-align:center;font-size:22px;font-weight:600;color:#fff;text-shadow:0 0 3px rgba(0,0,0,.8);pointer-events:none}
 .pqual{position:absolute;left:12px;top:56px;z-index:7;display:flex;align-items:center;gap:6px;font-size:13px;background:rgba(0,0,0,.45);padding:4px 10px;border-radius:12px;color:#fff}
@@ -2902,7 +2908,7 @@ const Poller = {
 };
 
 /* ===== Пациент: код, согласие, проверка оборудования, ожидание ===== */
-const CONSENT_TEXT = 'Я даю согласие на проведение консультации в дистанционной форме (видеосвязь) и на обработку моих персональных данных в объёме, необходимом для оказания медицинской помощи. Я понимаю, что дистанционная консультация не заменяет очный осмотр. Текст согласия задаётся центром.'; // шаблон заменяется юристом центра
+const CONSENT_TEXT = 'Я даю согласие на проведение консультации в дистанционной форме (видеосвязь) и на обработку моих персональных данных в объёме, необходимом для оказания медицинской помощи. Я понимаю, что дистанционная консультация не заменяет очный осмотр.'; // шаблон: юрист центра заменяет текст перед пилотом
 const Session = {
   code: null, hb: null,
   key() { return 'mars_pt_' + this.code; },
@@ -2927,7 +2933,7 @@ const Session = {
     this.showConsent(info);
   },
   showConsent(info) {
-    const cb = h('input', { type: 'checkbox', id: 'consent', style: 'width:24px;height:24px;flex:none' });
+    const cb = h('input', { type: 'checkbox', id: 'consent', 'aria-describedby': 'consent-text' });
     const btn = h('button', { class: 'btn pri lg', disabled: true, onclick: () => this.join(true) }, 'Продолжить');
     cb.addEventListener('change', () => { btn.disabled = !cb.checked; });
     $('#main').replaceChildren(h('div', { class: 'page' }, h('div', { class: 'stack' },
@@ -2936,9 +2942,9 @@ const Session = {
       h('div', { class: 'list' },
         h('div', { class: 'li' }, icon('user'), h('div', { class: 'grow' }, h('div', { class: 'sm mut', text: 'Врач' }), h('div', { text: info.doctor || 'Врач центра' }))),
         h('div', { class: 'li' }, icon('calendar'), h('div', { class: 'grow' }, h('div', { class: 'sm mut', text: 'Время' }), h('div', { text: fmtDT(info.scheduled) })))),
-      h('h3', { text: 'Согласие' }),
-      h('p', { style: 'margin:0', text: CONSENT_TEXT }),
-      h('label', { class: 'row', for: 'consent', style: 'min-height:44px;gap:12px' }, cb, h('span', { text: 'Я согласен(на) на дистанционную консультацию и обработку персональных данных' })),
+      h('h2', { class: 'consent-h', text: 'Согласие' }),
+      h('p', { id: 'consent-text', class: 'consent-text', text: CONSENT_TEXT }),
+      h('label', { class: 'consent-row', for: 'consent' }, cb, h('span', { text: 'Я согласен(на) на дистанционную консультацию и обработку персональных данных' })),
       btn)));
   },
   async join(withConsent) {

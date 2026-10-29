@@ -130,6 +130,12 @@ html.hc .cb::after{font-size:13px}
 @media (prefers-color-scheme:dark){html.hc{--fg2:#d1d1d6;--acct:#8CC4FF}}
 .stack>.bigtoggle{align-self:flex-start}
 .bigtoggle[aria-pressed=true]{background:var(--acc);color:#fff}
+.consent-h{margin:12px 0 0;font-size:calc(var(--fs) * 1.35)}
+.consent-text{margin:0;max-width:65ch;line-height:1.5}
+.consent-row{display:flex;align-items:flex-start;gap:14px;padding:16px;min-height:56px;border:2px solid var(--sep);border-radius:var(--r2);background:var(--bg3);cursor:pointer;line-height:1.4}
+.consent-row input{width:28px;height:28px;flex:none;margin:0;accent-color:var(--acc);cursor:pointer}
+.consent-row:has(input:checked){border-color:var(--acc);background:color-mix(in srgb,var(--acc) 8%,var(--bg3))}
+.consent-row:has(input:focus-visible){outline:2px solid var(--acc);outline-offset:2px}
 .vmsg{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;text-align:center;padding:24px;z-index:2;font-size:17px}
 .hint{position:absolute;left:12px;right:12px;bottom:84px;z-index:7;text-align:center;font-size:22px;font-weight:600;color:#fff;text-shadow:0 0 3px rgba(0,0,0,.8);pointer-events:none}
 .pqual{position:absolute;left:12px;top:56px;z-index:7;display:flex;align-items:center;gap:6px;font-size:13px;background:rgba(0,0,0,.45);padding:4px 10px;border-radius:12px;color:#fff}
