@@ -302,7 +302,7 @@ FaceMesh.Report = {
     const mine = k => { const l = hist.filter(m => m.kind === k && m.appt_id === a.id); return l.length ? l[l.length - 1].data : null; };
     const sym = F.latest.symmetry || mine('symmetry'), mob = F.latest.mobility || mine('mobility');
     const cmpList = hist.filter(m => m.kind === 'compare' && m.appt_id === a.id).map(m => m.data);
-    const rep = { kind: 'report', center: a.center || Cfg.center, patient: a.patient_name || '', doctor: a.doctor || '', appointment_id: a.id, date: fmtDT(Math.floor(Date.now() / 1000)), ts: Math.floor(Date.now() / 1000), symmetry: sym || null, mobility: mob || null, compare: cmpList, photo_ids: F.photos.map(p => ({ id: p.id, pose: p.pose, ts: p.ts })) };
+    const rep = { kind: 'report', center: a.center || Cfg.center, patient: a.patient_name || '', patient_id: a.patient_id == null ? null : a.patient_id, doctor: a.doctor || '', appointment_id: a.id, date: fmtDT(Math.floor(Date.now() / 1000)), ts: Math.floor(Date.now() / 1000), symmetry: sym || null, mobility: mob || null, compare: cmpList, photo_ids: F.photos.map(p => ({ id: p.id, pose: p.pose, ts: p.ts })) };
     const cal = (sym && sym.calibration) || (cmpList.find(c => c.calibration) || {}).calibration || F.cal;
     if (cal) rep.calibration = cal;
     /* ход консультации: только обезличенный текст, проверенный врачом */
@@ -362,6 +362,7 @@ FaceMesh.Report = {
           Print.go(node);
         } }, 'Печать или PDF'),
         h('button', { class: 'btn sec', onclick: () => Ui.download('отчёт-лицо-' + (rep.appointment_id || 'приём') + '.json', JSON.stringify(rep, null, 2)) }, icon('download'), 'Данные отчёта (JSON)'),
+        h('button', { class: 'btn sec', disabled: !(rep.symmetry || rep.mobility) || null, title: 'HL7 FHIR R4: пациент и наблюдения для медицинской информационной системы', onclick: () => Ui.download('fhir-лицо-' + (rep.appointment_id || 'приём') + '.json', JSON.stringify(F.Fhir.bundle(rep), null, 2), 'application/fhir+json') }, icon('download'), 'Экспорт FHIR'),
         h('button', { class: 'btn sec', onclick: async e => { e.target.disabled = true; try { await Api.post('/rooms/' + Api.room + '/measurements', rep); Toast.show('Отчёт сохранён в протокол'); } catch (er) { Toast.err(er); } e.target.disabled = false; } }, 'Сохранить в протокол')));
   }
 };
@@ -397,5 +398,65 @@ FaceMesh.Repeat = {
     out.push('', 'итог;метрика;разность: среднее;разность: SD;минимальное различимое изменение (MDC95);замеров');
     s.rows.forEach(r => out.push(['итог', r.label, num(r.diff.mean), num(r.diff.sd), num(r.diff.mdc), r.n].join(';')));
     return out.join('\n') + '\n';
+  }
+};
+
+/* ===== Face Mesh: экспорт отчёта в HL7 FHIR R4 (Bundle типа collection) =====
+   Метрики M.A.R.S. не имеют кодов LOINC, поэтому коды берутся из своей системы urn:mars:face-metric;
+   единицы — UCUM: mm с калибровкой, «1» для долей межзрачкового расстояния, deg для углов. */
+FaceMesh.Fhir = {
+  SYS: 'urn:mars:face-metric', UCUM: 'http://unitsofmeasure.org',
+  NOTE_SYM: 'Числа для документирования, не диагноз', NOTE_MOB: 'Наблюдение для врача, не оценка по клинической шкале',
+  seq: 0,
+  uuid() {
+    if (typeof crypto !== 'undefined' && crypto.randomUUID) return crypto.randomUUID();
+    const hex = (++this.seq).toString(16).padStart(12, '0');
+    return '00000000-0000-4000-8000-' + hex.slice(-12);
+  },
+  qty(value, mm, unitOverride) {
+    const [unit, code] = unitOverride || (mm ? ['мм', 'mm'] : ['доли МЗР', '1']);
+    return { value, unit, system: this.UCUM, code };
+  },
+  iso(ts) { return new Date(ts * 1000).toISOString(); },
+  obs(subject, id, label, ts, note, extra) {
+    return Object.assign({ resourceType: 'Observation', status: 'final',
+      category: [{ coding: [{ system: 'http://terminology.hl7.org/CodeSystem/observation-category', code: 'exam', display: 'Exam' }] }],
+      code: { coding: [{ system: this.SYS, code: id, display: label }], text: label },
+      subject: { reference: subject }, effectiveDateTime: this.iso(ts), note: [{ text: note }] }, extra);
+  },
+  /* компоненты наблюдения: правая, левая и третье значение (разность или соотношение); unit — [подпись, код UCUM] */
+  sides(right, left, third, mm, unit, thirdUnit) {
+    const c = (text, v, u) => v == null || !isFinite(v) ? null : { code: { text }, valueQuantity: this.qty(v, mm, u) };
+    return [c('Правая сторона', right, unit), c('Левая сторона', left, unit), third ? c(third[0], third[1], thirdUnit || unit) : null].filter(Boolean);
+  },
+  symObs(subject, s) {
+    const mm = !!(s.calibration && s.calibration.ipd_mm), k = f => mm ? f + '_mm' : f, ts = s.ts;
+    const method = { text: mm ? 'Калибровка ' + s.calibration.label : 'Нормировка на межзрачковое расстояние, без калибровки' };
+    const device = { display: 'M.A.R.S., расчёт: ' + (s.source === 'vision' ? 'сервис анализа' : 'устройство пациента') };
+    const rows = (s.rows || []).map(r => this.obs(subject, 'symmetry.' + r.id, r.label, ts, this.NOTE_SYM,
+      { method, device, component: this.sides(r[k('right')], r[k('left')], ['Разность (правая − левая)', r[k('diff')]], mm) }));
+    const singles = (s.singles || []).filter(x => x.value != null && isFinite(x.value)).map(x => this.obs(subject, 'symmetry.' + x.id, x.label, ts, this.NOTE_SYM,
+      { method, device, valueQuantity: x.unit === 'deg' ? this.qty(x.value, false, ['градусы', 'deg']) : this.qty(mm && x.value_mm != null ? x.value_mm : x.value, mm && x.value_mm != null) }));
+    return rows.concat(singles);
+  },
+  mobObs(subject, m) {
+    const coef = ['коэффициент 0–1', '1'];
+    return (m.tasks || []).map(t => this.obs(subject, 'mobility.' + t.id, t.label, m.ts, this.NOTE_MOB, t.single != null
+      ? { valueQuantity: this.qty(t.single, false, coef) }
+      : { component: this.sides(t.right, t.left, ['Соотношение сторон', t.ratio], false, coef, ['отношение', '1']) }));
+  },
+  bundle(rep) {
+    const entries = [], add = r => { const fullUrl = 'urn:uuid:' + this.uuid(); entries.push({ fullUrl, resource: r }); return fullUrl; };
+    const obsList = [];
+    if (rep.symmetry || rep.mobility) {
+      const pat = { resourceType: 'Patient' };
+      if (rep.patient_id != null) pat.identifier = [{ system: 'urn:mars:patient', value: String(rep.patient_id) }];
+      if (rep.patient) pat.name = [{ text: rep.patient }];
+      const subject = add(pat);
+      if (rep.symmetry) obsList.push(...this.symObs(subject, rep.symmetry));
+      if (rep.mobility) obsList.push(...this.mobObs(subject, rep.mobility));
+      obsList.forEach(add);
+    }
+    return { resourceType: 'Bundle', type: 'collection', timestamp: this.iso(rep.ts), entry: entries };
   }
 };
