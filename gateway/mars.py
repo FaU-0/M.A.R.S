@@ -2308,6 +2308,9 @@ html.hc .cb::after{font-size:13px}
 .sd .n{font-size:28px;font-weight:700;line-height:1.1;font-variant-numeric:tabular-nums;letter-spacing:-.01em}
 .sd .u{font-size:13px;color:var(--fg2)}
 .dose .df{padding:6px 12px 8px;font-size:13px;color:var(--fg2);border-top:1px solid var(--sep);font-variant-numeric:tabular-nums}
+.steps{border:1px solid var(--sep);border-radius:var(--r2);padding:12px 14px;background:var(--bg2)}
+.steps ol{margin:8px 0 0;padding-left:22px;display:flex;flex-direction:column;gap:6px}
+.steps li{line-height:1.4}.steps li.done{color:var(--fg2)}.steps li .chip{margin-left:8px;min-height:20px}
 details.fold{border-top:1px solid var(--sep);border-bottom:1px solid var(--sep)}
 details.fold>summary{min-height:44px;display:flex;align-items:center;gap:8px;cursor:pointer;font-weight:600;color:var(--acct);list-style:none}
 details.fold>summary::-webkit-details-marker{display:none}
@@ -4274,9 +4277,10 @@ Object.assign(FaceMesh, {
   },
   symDoses(p) {
     const k = p.calibration && p.calibration.ipd_mm, n = k ? 1 : 3, f = v => fx(v, n).replace('.', ',');
-    return h('div', { class: 'doses' }, (p.rows || []).map(r => this.doseCard(r.label,
+    const hint = k ? null : h('p', { class: 'note', style: 'margin:0', text: 'Без калибровки значения даны в долях межзрачкового расстояния (МЗР): 0,100 — одна десятая расстояния между зрачками этого пациента. Так значения сравнимы между приёмами, даже если пациент сидел дальше или ближе к камере. Чтобы видеть миллиметры, запросите калибровку.' });
+    return h('div', { class: 'stack' }, hint, h('div', { class: 'doses' }, (p.rows || []).map(r => this.doseCard(r.label,
       f(k ? r.right_mm : r.right), f(k ? r.left_mm : r.left), k ? 'мм' : 'МЗР',
-      'Разность (правая − левая): ' + f(k ? r.diff_mm : r.diff) + (k ? ' мм' : ''))));
+      'Разность (правая − левая): ' + f(k ? r.diff_mm : r.diff) + (k ? ' мм' : '')))));
   },
   mobDoses(p) {
     const f = v => fx(v, 2).replace('.', ',');
@@ -4513,12 +4517,24 @@ Object.assign(FaceMesh, {
     body.append(h('button', { class: 'btn pri', disabled: !this.consent || null, onclick: () => this.req('symmetry') }, 'Измерить симметрию'),
       h('div', { class: 'row wrap' }, h('button', { class: 'btn sec', disabled: !this.consent || null, onclick: () => this.req('mobility') }, 'Подвижность'), h('button', { class: 'btn sec', disabled: !this.consent || null, onclick: () => this.req('calibrate') }, 'Калибровка в мм')));
     if (!this.consent) body.append(h('p', { class: 'note', style: 'margin:0', text: 'Измерения станут доступны, когда пациент даст согласие на анализ лица.' }));
-    body.append(h('p', { class: 'note', style: 'margin:0', text: this.cal ? 'Калибровка: ' + this.cal.label + '; межзрачковое расстояние ' + this.cal.ipd_mm.toFixed(1).replace('.', ',') + ' мм.' : 'Калибровки нет: значения в миллиметрах не показываются.' }));
+    if (this.cal || !L.symmetry) body.append(h('p', { class: 'note', style: 'margin:0', text: this.cal ? 'Калибровка: ' + this.cal.label + '; межзрачковое расстояние ' + this.cal.ipd_mm.toFixed(1).replace('.', ',') + ' мм.' : 'Калибровки нет: значения в миллиметрах не показываются.' }));
+    if (!L.symmetry && !L.mobility) body.append(this.firstSteps());
     if (L.symmetry) body.append(h('h3', { text: 'Симметрия' }), this.symDoses(L.symmetry), this.fold('Все значения симметрии', this.symTable(L.symmetry)));
     else body.append(h('p', { class: 'note', style: 'margin:0', text: 'Метрик симметрии в этом приёме пока нет.' }));
     if (L.mobility) body.append(h('h3', { text: 'Подвижность' }), this.mobDoses(L.mobility), this.fold('Все значения подвижности', this.mobTable(L.mobility)));
     const chartBox = h('div', { class: 'stack' }); body.append(h('h3', { text: 'Динамика между приёмами' }), chartBox);
     this.loadHistory().then(hist => this.drawTrends(chartBox, hist)).catch(e => chartBox.replaceChildren(h('p', { class: 'note', text: e.message })));
+  },
+  /* порядок документирования лица для врача, который делает это впервые */
+  firstSteps() {
+    const steps = [
+      ['Пациент даёт согласие на анализ лица', this.consent],
+      ['«Измерить симметрию»: пациент держит голову прямо, числа приходят сюда', false],
+      ['«Калибровка в мм» — если нужны миллиметры, а не доли МЗР', !!this.cal],
+      ['«Подвижность» и снимки по ракурсам (раздел «Съёмка») — по необходимости', false],
+      ['Раздел «Отчёт»: печать или PDF с числами, снимками и динамикой', false]];
+    return h('div', { class: 'steps' }, h('h3', { text: 'Порядок документирования' }),
+      h('ol', null, steps.map(([t, done]) => h('li', { class: done ? 'done' : null }, t, done ? h('span', { class: 'chip g', text: 'готово' }) : null))));
   },
   /* ряды по приёмам: последнее измерение каждого приёма */
   series(hist, kind, pick) {
