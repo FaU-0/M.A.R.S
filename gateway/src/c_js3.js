@@ -275,7 +275,7 @@ const Chat = {
     this.input = h('textarea', { class: 'inp', rows: 1, placeholder: 'Сообщение', 'aria-label': 'Текст сообщения', style: 'min-height:44px;height:44px;resize:none' });
     this.input.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); this.send(); } });
     return h('div', { class: 'stack', style: 'flex:1;min-height:0' }, this.list,
-      h('div', { class: 'sheetrow' }, this.input, h('button', { class: 'ibtn', style: 'background:var(--acc);color:#fff', 'aria-label': 'Отправить', onclick: () => this.send() }, icon('send'))));
+      h('div', { class: 'sheetrow' }, this.input, h('button', { class: 'ibtn', style: 'background:var(--acc);color:var(--onacc)', 'aria-label': 'Отправить', onclick: () => this.send() }, icon('send'))));
   },
   async send() {
     const text = this.input.value.trim(); if (!text) return;

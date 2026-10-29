@@ -16,7 +16,7 @@ const deg = r => r * 180 / Math.PI;
 
 const FaceMesh = {
   role: null, consent: false, mode: 'off', coach: false, autocrop: false, secondary: false, tol: 5, poses: ['frontal', 'left45', 'right45', 'left90', 'right90'],
-  trk: null, trk2: null, els: {}, cal: null, latest: {}, info: null, unavailable: '', busy: 0, subs: new Set(), lastAssess: 0, lastSend: 0, motion: [], timers: [], photos: [], dpr: 1, sizes: new Map(), accent: '#007AFF', accT: 0,
+  trk: null, trk2: null, els: {}, cal: null, latest: {}, info: null, unavailable: '', busy: 0, subs: new Set(), lastAssess: 0, lastSend: 0, motion: [], timers: [], photos: [], dpr: 1, sizes: new Map(), accent: '#7CCAD6', accT: 0,
   Loader: {}, Overlay: {}, Pose: {}, Symmetry: {}, Mobility: {}, Capture: {}, Compare: {}, Calibrate: {}, Privacy: {}, Report: {}, Remote: {}
 };
 
@@ -247,7 +247,7 @@ FaceMesh.Overlay = {
   },
   frame() {
     const F = FaceMesh, t = performance.now();
-    if (t - F.accT > 1500) { F.accT = t; F.accent = getComputedStyle(document.documentElement).getPropertyValue('--acc').trim() || '#007AFF'; }
+    if (t - F.accT > 1500) { F.accT = t; F.accent = getComputedStyle(document.documentElement).getPropertyValue('--mesh').trim() || '#7CCAD6'; }
     const dpr = window.devicePixelRatio || 1;
     const items = [[F.els.ovR, F.els.remote, 'remote', 'contain'], [F.els.ovL, F.els.local, 'local', 'cover']];
     for (const [c, v, which, fit] of items) {

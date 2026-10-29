@@ -512,7 +512,8 @@ FaceMesh.Chart = {
     ctx.textAlign = 'center'; ctx.textBaseline = 'top';
     const uniq = [...new Set(pts.map(p => p.x))].sort((a, b) => a - b); const step = Math.ceil(uniq.length / 5);
     uniq.forEach((x, i) => { if (i % step === 0) ctx.fillText(fmtDate(x), clamp(X(x), L + 20, W - R - 20), H - B + 8); });
-    const cols = [pr ? '#0050B3' : (FaceMesh.accent || '#007AFF'), '#FF9500', '#34C759', '#AF52DE'];
+    const css = getComputedStyle(document.documentElement), tok = (n, d) => (pr ? d : css.getPropertyValue(n).trim() || d);
+    const cols = [tok('--side-l', '#0B5563'), tok('--side-r', '#B4530A'), tok('--ser3', '#5E7A1F'), tok('--ser4', '#7A4E9C')];
     series.forEach((s, k) => {
       if (!s.points.length) return; ctx.strokeStyle = ctx.fillStyle = cols[k % cols.length]; ctx.lineWidth = 2; ctx.beginPath();
       s.points.forEach((p, i) => { if (i) ctx.lineTo(X(p.x), Y(p.y)); else ctx.moveTo(X(p.x), Y(p.y)); }); ctx.stroke();
