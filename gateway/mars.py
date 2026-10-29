@@ -2235,7 +2235,7 @@ textarea.inp{min-height:88px;resize:vertical}
 .rside{border-left:1px solid var(--sep)}
 .rside .tabs{flex:none;display:flex;gap:2px;padding:8px;overflow-x:auto;border-bottom:1px solid var(--sep)}
 .rside .tabs{padding:0 8px!important}
-.rside .tabs button{min-height:44px;padding:0 12px;white-space:nowrap;font-size:13px;color:var(--fg2)}
+.rside .tabs button{min-height:44px;padding:0 8px;white-space:nowrap;font-size:13px;color:var(--fg2)}
 .rside .tabs button[aria-selected=true]{color:var(--acct);font-weight:600;box-shadow:inset 0 -3px var(--acc)}
 .pane{flex:1;min-height:0;overflow:auto;padding:16px;display:none;flex-direction:column;gap:12px}
 .pane.on{display:flex}
@@ -2297,6 +2297,23 @@ html.hc .cb::after{font-size:13px}
 .pqual{position:absolute;left:12px;top:56px;z-index:7;display:flex;align-items:center;gap:6px;font-size:13px;background:rgba(0,0,0,.45);padding:4px 10px;border-radius:12px;color:#fff}
 .frame-ok{position:absolute;inset:6px;border:2px solid var(--ok);border-radius:var(--r2);pointer-events:none;z-index:4}
 .meter{height:8px;border-radius:4px;background:var(--bg2);overflow:hidden}.meter>i{display:block;height:100%;width:0;background:var(--ok);transform-origin:left}
+/* лицо: значения по сторонам, как дозировка на упаковке */
+.doses{display:grid;grid-template-columns:1fr;gap:8px}
+.dose{border:1px solid var(--sep);border-radius:var(--r2);background:var(--bg3);overflow:hidden}
+.dose h4{margin:0;padding:8px 12px;font-size:13px;font-weight:600}
+.dose .sides{display:grid;grid-template-columns:1fr 1fr}
+.dose .sd{display:flex;align-items:baseline;flex-wrap:wrap;column-gap:6px;padding:8px 12px 10px;border-top:4px solid var(--side-r)}
+.dose .sd.l{border-top-color:var(--side-l);border-left:1px solid var(--sep)}
+.sd .k{width:100%;font-size:12px;font-weight:600;color:var(--fg2)}
+.sd .n{font-size:28px;font-weight:700;line-height:1.1;font-variant-numeric:tabular-nums;letter-spacing:-.01em}
+.sd .u{font-size:13px;color:var(--fg2)}
+.dose .df{padding:6px 12px 8px;font-size:13px;color:var(--fg2);border-top:1px solid var(--sep);font-variant-numeric:tabular-nums}
+details.fold{border-top:1px solid var(--sep);border-bottom:1px solid var(--sep)}
+details.fold>summary{min-height:44px;display:flex;align-items:center;gap:8px;cursor:pointer;font-weight:600;color:var(--acct);list-style:none}
+details.fold>summary::-webkit-details-marker{display:none}
+details.fold>summary::before{content:'';width:8px;height:8px;border-right:2px solid currentColor;border-bottom:2px solid currentColor;transform:rotate(-45deg);transition:transform .15s}
+details.fold[open]>summary::before{transform:rotate(45deg)}
+details.fold>.stack{padding:4px 0 12px}
 /* чат и файлы */
 .msgs{flex:1;overflow:auto;display:flex;flex-direction:column;gap:8px;min-height:120px}
 .msg{max-width:88%;padding:8px 12px;border-radius:var(--r2);background:var(--bg2);align-self:flex-start;word-break:break-word;white-space:pre-wrap}
@@ -3127,7 +3144,7 @@ const CallUi = {
     R.wrap = h('div', { class: 'callwrap' }, R.stage, R.self, R.vtop, R.vmsg, R.pq, R.hint, R.bar);
     R.center = h('div', { class: 'center' }, R.wrap);
     /* панели */
-    const tabs = isDoc ? [['card', 'Карточка', 'user'], ['chat', 'Чат', 'chat'], ['files', 'Файлы', 'file'], ['tr', 'Расшифровка', 'text'], ['concl', 'Заключение', 'doc'], ['face', 'Лицо', 'face']]
+    const tabs = isDoc ? [['card', 'Карточка', 'user'], ['face', 'Лицо', 'face'], ['chat', 'Чат', 'chat'], ['files', 'Файлы', 'file'], ['tr', 'Расшифровка', 'text'], ['concl', 'Заключение', 'doc']]
       : [['chat', 'Чат', 'chat'], ['files', 'Файлы', 'file'], ['face', 'Задания', 'face']];
     const content = {
       chat: Chat.build(), files: Files.build(),
@@ -4248,6 +4265,26 @@ Object.assign(FaceMesh, {
       h('p', { class: 'note', style: 'margin:0', text: 'МЗР: межзрачковое расстояние. Положительное значение смещения: в сторону левой половины лица пациента. Кадров в выборке: ' + (p.samples || 0) + '.' + src }),
       h('p', { class: 'note', style: 'margin:0;font-weight:600', text: SIGN_SYM }));
   },
+  /* крупные значения по сторонам: правая и левая своим цветом, как дозировка на упаковке */
+  doseCard(title, right, left, unit, foot) {
+    const sd = (cls, name, v) => h('div', { class: 'sd ' + cls }, h('span', { class: 'k', text: name }), h('span', { class: 'n', text: v }), unit ? h('span', { class: 'u', text: unit }) : null);
+    return h('div', { class: 'dose', role: 'group', 'aria-label': title },
+      h('h4', { text: title }), h('div', { class: 'sides' }, sd('r', 'Правая', right), sd('l', 'Левая', left)),
+      foot ? h('div', { class: 'df', text: foot }) : null);
+  },
+  symDoses(p) {
+    const k = p.calibration && p.calibration.ipd_mm, n = k ? 1 : 3, f = v => fx(v, n).replace('.', ',');
+    return h('div', { class: 'doses' }, (p.rows || []).map(r => this.doseCard(r.label,
+      f(k ? r.right_mm : r.right), f(k ? r.left_mm : r.left), k ? 'мм' : 'МЗР',
+      'Разность (правая − левая): ' + f(k ? r.diff_mm : r.diff) + (k ? ' мм' : ''))));
+  },
+  mobDoses(p) {
+    const f = v => fx(v, 2).replace('.', ',');
+    return h('div', { class: 'doses' }, (p.tasks || []).map(t => t.single != null
+      ? h('div', { class: 'dose', role: 'group', 'aria-label': t.label }, h('h4', { text: t.label }), h('div', { class: 'df', text: 'Обе стороны вместе (модель не разделяет): ' + f(t.single) }))
+      : this.doseCard(t.label, f(t.right), f(t.left), '', 'Соотношение сторон: ' + (t.ratio == null ? '-' : f(t.ratio)) + ' (1 — одинаково)')));
+  },
+  fold(title, ...kids) { return h('details', { class: 'fold' }, h('summary', { text: title }), h('div', { class: 'stack' }, ...kids)); },
   mobTable(p) {
     return h('div', { class: 'stack' },
       h('table', { class: 'tb' }, h('tr', null, h('th', { text: 'Задание (максимум коэффициента 0-1)' }), h('th', { class: 'n', text: 'Правая' }), h('th', { class: 'n', text: 'Левая' }), h('th', { class: 'n', text: 'Соотношение' })),
@@ -4456,12 +4493,12 @@ Object.assign(FaceMesh, {
     if (this.unavailable) { box.replaceChildren(h('h3', { text: 'Лицо' }), h('p', { text: this.unavailable })); return; }
     const cons = this.consent ? h('span', { class: 'chip g', text: 'Пациент дал согласие' }) : h('span', { class: 'chip o', text: 'Пациент не дал согласие' });
     this.poseRow = h('div', { class: 'sm', role: 'status', 'aria-live': 'polite' }); this.updatePoseRow();
-    const head = h('div', { class: 'stack' }, h('div', { class: 'rowb' }, h('h3', { text: 'Лицо' }), cons),
+    const head = h('div', { class: 'stack' }, h('div', { class: 'rowb' }, h('h3', { text: 'Лицо' }), cons), this.poseRow,
+      this.fold('Сетка на видео и кадрирование',
       Ui.segmented([['off', 'Выкл'], ['grid', 'Сетка'], ['contour', 'Контуры']], this.mode, m => this.setMode(m), 'Режим сетки (F)'),
       h('label', { class: 'row', style: 'min-height:44px' }, h('input', { type: 'checkbox', style: 'width:22px;height:22px', checked: this.autocrop || null, disabled: !this.consent || null, onchange: e => { this.autocrop = e.target.checked; this.sync(); } }), ' Автокадрирование по лицу (только у вас)'),
       h('label', { class: 'row', style: 'min-height:44px' }, h('input', { type: 'checkbox', style: 'width:22px;height:22px', checked: this.secondary || null, onchange: e => { this.secondary = e.target.checked; this.sync(); } }), ' Сетка и на самовидении'),
-      this.poseRow,
-      h('p', { class: 'note', style: 'margin:0', text: 'Сетка и поза по входящему видео построены по сжатому потоку и ориентировочны. Точные измерения выполняются на устройстве пациента.' }));
+      h('p', { class: 'note', style: 'margin:0', text: 'Сетка и поза по входящему видео построены по сжатому потоку и ориентировочны. Точные измерения выполняются на устройстве пациента.' })));
     const tabs = Ui.segmented([['metrics', 'Метрики'], ['capture', 'Съёмка'], ['compare', 'Сравнение'], ['report', 'Отчёт']], this.dTab, t => { this.dTab = t; this.renderDoctor(); }, 'Разделы');
     const body = h('div', { class: 'stack' });
     box.replaceChildren(head, tabs, body);
@@ -4473,10 +4510,13 @@ Object.assign(FaceMesh, {
   },
   tabMetrics(body) {
     const L = this.latest;
-    body.append(h('div', { class: 'row wrap' }, h('button', { class: 'btn sec', onclick: () => this.req('symmetry') }, 'Запросить симметрию'), h('button', { class: 'btn sec', onclick: () => this.req('mobility') }, 'Запросить подвижность'), h('button', { class: 'btn sec', onclick: () => this.req('calibrate') }, 'Запросить калибровку')));
+    body.append(h('button', { class: 'btn pri', disabled: !this.consent || null, onclick: () => this.req('symmetry') }, 'Измерить симметрию'),
+      h('div', { class: 'row wrap' }, h('button', { class: 'btn sec', disabled: !this.consent || null, onclick: () => this.req('mobility') }, 'Подвижность'), h('button', { class: 'btn sec', disabled: !this.consent || null, onclick: () => this.req('calibrate') }, 'Калибровка в мм')));
+    if (!this.consent) body.append(h('p', { class: 'note', style: 'margin:0', text: 'Измерения станут доступны, когда пациент даст согласие на анализ лица.' }));
     body.append(h('p', { class: 'note', style: 'margin:0', text: this.cal ? 'Калибровка: ' + this.cal.label + '; межзрачковое расстояние ' + this.cal.ipd_mm.toFixed(1) + ' мм.' : 'Калибровки нет: значения в миллиметрах не показываются.' }));
-    if (L.symmetry) body.append(h('h3', { text: 'Симметрия (последнее измерение)' }), this.symTable(L.symmetry)); else body.append(h('p', { class: 'note', style: 'margin:0', text: 'Метрик симметрии в этом приёме пока нет.' }));
-    if (L.mobility) body.append(h('h3', { text: 'Подвижность (последнее измерение)' }), this.mobTable(L.mobility));
+    if (L.symmetry) body.append(h('h3', { text: 'Симметрия' }), this.symDoses(L.symmetry), this.fold('Все значения симметрии', this.symTable(L.symmetry)));
+    else body.append(h('p', { class: 'note', style: 'margin:0', text: 'Метрик симметрии в этом приёме пока нет.' }));
+    if (L.mobility) body.append(h('h3', { text: 'Подвижность' }), this.mobDoses(L.mobility), this.fold('Все значения подвижности', this.mobTable(L.mobility)));
     const chartBox = h('div', { class: 'stack' }); body.append(h('h3', { text: 'Динамика между приёмами' }), chartBox);
     this.loadHistory().then(hist => this.drawTrends(chartBox, hist)).catch(e => chartBox.replaceChildren(h('p', { class: 'note', text: e.message })));
   },
@@ -4492,15 +4532,15 @@ Object.assign(FaceMesh, {
     const symDefs = [['half', 'Ширина половин лица: разность'], ['brow', 'Высота бровей: разность'], ['mcor', 'Уголки рта: разность высот'], ['mouth', 'Уголки рта до средней линии: разность']];
     for (const [id, title] of symDefs) {
       const s = this.series(hist, 'symmetry', d => { const r = (d.rows || []).find(x => x.id === id); return r ? r.diff : null; });
-      cvs.push([title + ' (доли МЗР)', [{ name: 'правая минус левая', points: s }]]);
+      cvs.push([title + ' (доли МЗР)', [{ name: 'правая минус левая', points: s }], [-0.1, 0.1]]);
     }
-    const s1 = this.series(hist, 'symmetry', d => { const r = (d.singles || []).find(x => x.id === 'tilt'); return r ? r.value : null; }); cvs.push(['Наклон линии глаз (градусы)', [{ name: 'наклон', points: s1 }]]);
+    const s1 = this.series(hist, 'symmetry', d => { const r = (d.singles || []).find(x => x.id === 'tilt'); return r ? r.value : null; }); cvs.push(['Наклон линии глаз (градусы)', [{ name: 'наклон', points: s1 }], [-5, 5]]);
     const mob = id => this.series(hist, 'mobility', d => { const t = (d.tasks || []).find(x => x.id === id); return t && t.ratio != null ? t.ratio : null; });
-    cvs.push(['Подвижность: соотношение сторон', [{ name: 'улыбка', points: mob('smile') }, { name: 'брови', points: mob('brow') }, { name: 'глаза', points: mob('eye') }, { name: 'губы', points: mob('lips') }]]);
+    cvs.push(['Подвижность: соотношение сторон', [{ name: 'улыбка', points: mob('smile') }, { name: 'брови', points: mob('brow') }, { name: 'глаза', points: mob('eye') }, { name: 'губы', points: mob('lips') }], [0, 1]]);
     const nodes = []; const urls = [];
-    for (const [title, ser] of cvs) {
+    for (const [title, ser, fixed] of cvs) {
       if (!ser.some(s => s.points.length)) continue;
-      const cv = h('canvas', { style: 'width:100%;height:auto', 'aria-label': title }); this.Chart.line(cv, ser, { title, print: forPrint });
+      const cv = h('canvas', { style: 'width:100%;height:auto', 'aria-label': title }); this.Chart.line(cv, ser, { title, print: forPrint, fixed });
       nodes.push(cv); urls.push({ title, url: cv.toDataURL('image/png') });
     }
     if (box) box.replaceChildren(...(nodes.length ? nodes : [h('p', { class: 'note', style: 'margin:0', text: 'Данных по предыдущим приёмам пока нет. Графики появятся после нескольких измерений.' })]));
@@ -4553,8 +4593,10 @@ FaceMesh.Chart = {
     ctx.font = '13px sans-serif'; ctx.fillStyle = fg; ctx.textBaseline = 'top'; ctx.fillText(o.title || '', 8, 6);
     const pts = series.flatMap(s => s.points); if (!pts.length) return;
     let x0 = Math.min(...pts.map(p => p.x)), x1 = Math.max(...pts.map(p => p.x)), y0 = Math.min(...pts.map(p => p.y)), y1 = Math.max(...pts.map(p => p.y));
-    if (x1 === x0) { x0 -= 86400; x1 += 86400; } if (y1 === y0) { y0 -= 0.05; y1 += 0.05; }
-    const pad = (y1 - y0) * 0.1; y0 -= pad; y1 += pad;
+    if (x1 === x0) { x0 -= 86400; x1 += 86400; }
+    /* фиксированная шкала одна для всех пациентов; расширяется, только если значение за её пределами */
+    if (o && o.fixed) { y0 = Math.min(o.fixed[0], y0); y1 = Math.max(o.fixed[1], y1); }
+    else { if (y1 === y0) { y0 -= 0.05; y1 += 0.05; } const pad = (y1 - y0) * 0.1; y0 -= pad; y1 += pad; }
     const L = 52, R = 12, T = 30, B = 44, pw = W - L - R, ph = H - T - B;
     const X = x => L + (x - x0) / (x1 - x0) * pw, Y = y => T + ph - (y - y0) / (y1 - y0) * ph;
     ctx.strokeStyle = grid; ctx.lineWidth = 1; ctx.fillStyle = fg; ctx.textBaseline = 'middle';
