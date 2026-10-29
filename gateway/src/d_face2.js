@@ -231,7 +231,7 @@ Object.assign(FaceMesh, {
   },
   /* лист с превью камеры для заданий пациента */
   taskSheet(title) {
-    const vid = h('video', { autoplay: true, playsinline: true, class: 'mirror', style: 'width:100%;aspect-ratio:4/3;object-fit:cover;background:#000;border-radius:14px' }); vid.muted = true; vid.srcObject = Media.stream;
+    const vid = h('video', { autoplay: true, playsinline: true, class: 'mirror', style: 'width:100%;aspect-ratio:4/3;object-fit:cover;background:#000;border-radius:var(--r2)' }); vid.muted = true; vid.srcObject = Media.stream;
     const hint = h('div', { class: 'big-hint', role: 'status', 'aria-live': 'polite', text: '' });
     const prog = h('progress', { max: 1, value: 0, style: 'width:100%;height:12px' });
     const body = h('div', { class: 'stack' });
@@ -316,7 +316,7 @@ Object.assign(FaceMesh, {
           const cal = S.length >= 12 ? C.fromIris(S) : null;
           if (!cal) { T.body.replaceChildren(h('p', { text: 'Не удалось получить устойчивый кадр в анфасе. Повторите.' }), h('button', { class: 'btn pri', onclick: iris }, 'Повторить')); return; }
           T.hint.textContent = 'Приблизительно, погрешность выше';
-          T.body.replaceChildren(h('p', { style: 'margin:0', text: 'Межзрачковое расстояние: ' + cal.ipd_mm.toFixed(1) + ' мм (' + cal.label + ').' }),
+          T.body.replaceChildren(h('p', { style: 'margin:0', text: 'Межзрачковое расстояние: ' + cal.ipd_mm.toFixed(1).replace('.', ',') + ' мм (' + cal.label + ').' }),
             h('div', { class: 'row wrap' }, h('button', { class: 'btn pri', onclick: () => saveCal(cal) }, 'Сохранить'), h('button', { class: 'btn sec', onclick: menu }, 'Назад')));
         }
       }, 200);
@@ -330,7 +330,7 @@ Object.assign(FaceMesh, {
       const trk = this.trk, cur = trk && trk.cur, e = cur && this.Pose.euler(cur);
       if (!cur || trk.lost() || !this.Pose.inTol(e, this.tol)) { Toast.show('Нужен анфас в допуске: ' + (this.info && this.info.hint || 'смотрите прямо в камеру')); return; }
       const v = this.els.local, cv = document.createElement('canvas'); cv.width = v.videoWidth; cv.height = v.videoHeight; cv.getContext('2d').drawImage(v, 0, 0);
-      cv.style.cssText = 'width:100%;border-radius:14px;touch-action:none;cursor:crosshair'; const pts = [];
+      cv.style.cssText = 'width:100%;border-radius:var(--r2);touch-action:none;cursor:crosshair'; const pts = [];
       const names = ['левый верхний', 'правый верхний', 'правый нижний', 'левый нижний'];
       T.hint.textContent = 'Отметьте угол карты: ' + names[0];
       const ctx = cv.getContext('2d');
@@ -343,7 +343,7 @@ Object.assign(FaceMesh, {
         const cal = C.fromCard(pts, C.ipdPx(cur));
         if (!cal) { T.hint.textContent = 'Углы отмечены неверно'; T.body.replaceChildren(h('button', { class: 'btn pri', onclick: card }, 'Повторить')); return; }
         T.hint.textContent = '';
-        T.body.append(h('p', { style: 'margin:8px 0 0', text: 'Межзрачковое расстояние: ' + cal.ipd_mm.toFixed(1) + ' мм; масштаб ' + cal.mm_per_px.toFixed(4) + ' мм/пиксель.' + (cal.skew > 0.08 ? ' Пропорции карты искажены (' + (cal.skew * 100).toFixed(0) + '%): карта наклонена, точность снижена.' : '') }),
+        T.body.append(h('p', { style: 'margin:8px 0 0', text: 'Межзрачковое расстояние: ' + cal.ipd_mm.toFixed(1).replace('.', ',') + ' мм; масштаб ' + cal.mm_per_px.toFixed(4) + ' мм/пиксель.' + (cal.skew > 0.08 ? ' Пропорции карты искажены (' + (cal.skew * 100).toFixed(0) + '%): карта наклонена, точность снижена.' : '') }),
           h('div', { class: 'row wrap' }, h('button', { class: 'btn pri', onclick: () => saveCal(cal) }, 'Сохранить'), h('button', { class: 'btn sec', onclick: card }, 'Заново')));
       });
       T.body.replaceChildren(cv);
@@ -446,7 +446,7 @@ Object.assign(FaceMesh, {
     body.append(h('button', { class: 'btn pri', disabled: !this.consent || null, onclick: () => this.req('symmetry') }, 'Измерить симметрию'),
       h('div', { class: 'row wrap' }, h('button', { class: 'btn sec', disabled: !this.consent || null, onclick: () => this.req('mobility') }, 'Подвижность'), h('button', { class: 'btn sec', disabled: !this.consent || null, onclick: () => this.req('calibrate') }, 'Калибровка в мм')));
     if (!this.consent) body.append(h('p', { class: 'note', style: 'margin:0', text: 'Измерения станут доступны, когда пациент даст согласие на анализ лица.' }));
-    body.append(h('p', { class: 'note', style: 'margin:0', text: this.cal ? 'Калибровка: ' + this.cal.label + '; межзрачковое расстояние ' + this.cal.ipd_mm.toFixed(1) + ' мм.' : 'Калибровки нет: значения в миллиметрах не показываются.' }));
+    body.append(h('p', { class: 'note', style: 'margin:0', text: this.cal ? 'Калибровка: ' + this.cal.label + '; межзрачковое расстояние ' + this.cal.ipd_mm.toFixed(1).replace('.', ',') + ' мм.' : 'Калибровки нет: значения в миллиметрах не показываются.' }));
     if (L.symmetry) body.append(h('h3', { text: 'Симметрия' }), this.symDoses(L.symmetry), this.fold('Все значения симметрии', this.symTable(L.symmetry)));
     else body.append(h('p', { class: 'note', style: 'margin:0', text: 'Метрик симметрии в этом приёме пока нет.' }));
     if (L.mobility) body.append(h('h3', { text: 'Подвижность' }), this.mobDoses(L.mobility), this.fold('Все значения подвижности', this.mobTable(L.mobility)));

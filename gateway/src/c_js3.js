@@ -437,7 +437,7 @@ const Record = {
       mk('meds', 'Принимаемые препараты', h('textarea', { class: 'inp', rows: 2 })), mk('complaints', 'Жалобы', h('textarea', { class: 'inp', rows: 3 })),
       h('h3', { text: 'Местонахождение пациента' }),
       Ui.field('Адрес (обязательно)', this.loc.address), Ui.field('Телефон (обязательно)', this.loc.phone),
-      h('div', { class: 'banner warn', style: 'border-radius:10px', text: 'Экстренные службы: 103 / 112' }),
+      h('div', { class: 'banner warn', style: 'border-radius:var(--r1)', text: 'Экстренные службы: 103 / 112' }),
       h('h3', { text: 'Приватные заметки' }), this.notes,
       h('p', { class: 'note', style: 'margin:0', text: 'Заметки и карточка пациенту не передаются.' }), hist);
   },

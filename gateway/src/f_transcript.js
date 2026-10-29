@@ -28,7 +28,7 @@ const Transcript = {
     if (!(await Ui.confirm('Показать оригинал?', 'Исходная расшифровка содержит личные данные пациента. Просмотр записывается в журнал аудита.', 'Показать'))) return;
     let r; try { r = await Api.get('/rooms/' + Api.room + '/transcript/original'); } catch (e) { Toast.err(e); return; }
     const s = Ui.sheet({ title: 'Исходная расшифровка', wide: true });
-    s.el.append(h('div', { class: 'banner warn', style: 'border-radius:10px', text: 'Содержит личные данные. Не копируйте этот текст в отчёт.' }), this.list(r.segments, false));
+    s.el.append(h('div', { class: 'banner warn', style: 'border-radius:var(--r1)', text: 'Содержит личные данные. Не копируйте этот текст в отчёт.' }), this.list(r.segments, false));
   },
   addSheet() {
     const sel = (window.getSelection && String(window.getSelection())).trim();
@@ -63,10 +63,11 @@ const Transcript = {
     const d = this.d, st = this.st, kids = [];
     if (!d) { el.replaceChildren(h('p', { class: 'mut', text: 'Загрузка...' })); return; }
     const live = st && st.chunks ? 'Кусков записи: ' + st.chunks + ', расшифровано: ' + st.done + (st.queued ? ', в очереди: ' + st.queued : '') + '.' : '';
-    if (d.status === 'none') kids.push(h('p', { style: 'margin:0', text: 'Обезличенной расшифровки пока нет. Она появится после завершения приёма, если пациент дал согласие на расшифровку речи.' }), live ? h('p', { class: 'note', style: 'margin:0', text: live }) : null);
-    if (d.status === 'queued') kids.push(h('div', { class: 'banner', style: 'border-radius:10px', role: 'status', text: d.waiting ? 'Сервис обезличивания временно недоступен. Расшифровка сохранена и будет обезличена, когда сервис заработает.' : 'Идёт обезличивание расшифровки. На процессоре это может занять несколько минут.' }));
-    if (d.status === 'error') kids.push(h('div', { class: 'banner bad', style: 'border-radius:10px', text: 'Не удалось обезличить: ' + ((d.error && d.error.message) || 'ошибка') + '.' }));
-    if (st && (st.error || st.cancelled)) kids.push(h('div', { class: 'banner warn', style: 'border-radius:10px', text: 'Расшифровка неполная: ' + (st.error ? 'не удалось расшифровать кусков записи — ' + st.error : '') + (st.error && st.cancelled ? '; ' : '') + (st.cancelled ? 'удалено после отзыва согласия — ' + st.cancelled : '') + '.' }));
+    if (d.status === 'none') kids.push(h('p', { style: 'margin:0', text: 'Обезличенной расшифровки пока нет. Она появится после завершения приёма, если пациент дал согласие на расшифровку речи.' }), live ? h('p', { class: 'note', style: 'margin:0', text: live }) : null,
+      Speech.on ? null : h('button', { class: 'btn pri', style: 'align-self:flex-start', onclick: () => Speech.request() }, icon('audio'), 'Запросить согласие на расшифровку'));
+    if (d.status === 'queued') kids.push(h('div', { class: 'banner', style: 'border-radius:var(--r1)', role: 'status', text: d.waiting ? 'Сервис обезличивания временно недоступен. Расшифровка сохранена и будет обезличена, когда сервис заработает.' : 'Идёт обезличивание расшифровки. На процессоре это может занять несколько минут.' }));
+    if (d.status === 'error') kids.push(h('div', { class: 'banner bad', style: 'border-radius:var(--r1)', text: 'Не удалось обезличить: ' + ((d.error && d.error.message) || 'ошибка') + '.' }));
+    if (st && (st.error || st.cancelled)) kids.push(h('div', { class: 'banner warn', style: 'border-radius:var(--r1)', text: 'Расшифровка неполная: ' + (st.error ? 'не удалось расшифровать кусков записи — ' + st.error : '') + (st.error && st.cancelled ? '; ' : '') + (st.cancelled ? 'удалено после отзыва согласия — ' + st.cancelled : '') + '.' }));
     const btns = [];
     if (d.status === 'done') {
       kids.push(h('div', { class: 'row wrap', style: 'gap:8px' }, d.confirmed ? h('span', { class: 'chip g', text: 'Проверено врачом, идёт в отчёт' }) : h('span', { class: 'chip o', text: 'Не проверено: в отчёт не попадает' }),

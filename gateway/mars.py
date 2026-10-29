@@ -2275,7 +2275,7 @@ canvas.ov{position:absolute;inset:0;width:100%;height:100%;pointer-events:none}
 .cb::after{content:attr(data-short);position:absolute;top:calc(100% + 3px);left:50%;transform:translateX(-50%);font-size:11px;font-weight:600;line-height:1;color:#fff;white-space:nowrap;pointer-events:none}
 .only-wide{white-space:nowrap}
 /* телефон: в панели звонка 4 главные кнопки (чат и задания есть в нижней навигации), в шапке точка без подписи */
-@media (max-width:700px){.only-wide{display:none}.callbar .cb.wide-only{display:none}.callbar{gap:18px}}
+@media (max-width:700px){.brand span{display:none}.only-wide{display:none}.callbar .cb.wide-only{display:none}.callbar{gap:18px}}
 /* «Крупно и контрастно» (Ui.big): крупнее текст и элементы, темнее вторичный текст, рамки и полоса */
 html.hc{--fg2:#2E373A;--sep:#7A878B;--acc:#083F4A;--acct:#083F4A;--band:#083F4A}
 html.hc .btn,html.hc .inp{min-height:52px}
@@ -2985,7 +2985,7 @@ const Session = {
   },
   async precheck() {
     State.set({ view: 'precheck' }); Header.update();
-    const vid = h('video', { autoplay: true, muted: true, playsinline: true, class: 'mirror', style: 'width:100%;aspect-ratio:4/3;object-fit:cover;background:#000;border-radius:14px' });
+    const vid = h('video', { autoplay: true, muted: true, playsinline: true, class: 'mirror', style: 'width:100%;aspect-ratio:4/3;object-fit:cover;background:#000;border-radius:var(--r2)' });
     const msg = h('div', { class: 'banner warn hidden', role: 'alert' });
     const meter = h('div', { class: 'meter', role: 'progressbar', 'aria-label': 'Уровень микрофона' }, h('i'));
     const selV = h('select', { class: 'inp' }), selA = h('select', { class: 'inp' });
@@ -3504,7 +3504,7 @@ const Record = {
       mk('meds', 'Принимаемые препараты', h('textarea', { class: 'inp', rows: 2 })), mk('complaints', 'Жалобы', h('textarea', { class: 'inp', rows: 3 })),
       h('h3', { text: 'Местонахождение пациента' }),
       Ui.field('Адрес (обязательно)', this.loc.address), Ui.field('Телефон (обязательно)', this.loc.phone),
-      h('div', { class: 'banner warn', style: 'border-radius:10px', text: 'Экстренные службы: 103 / 112' }),
+      h('div', { class: 'banner warn', style: 'border-radius:var(--r1)', text: 'Экстренные службы: 103 / 112' }),
       h('h3', { text: 'Приватные заметки' }), this.notes,
       h('p', { class: 'note', style: 'margin:0', text: 'Заметки и карточка пациенту не передаются.' }), hist);
   },
@@ -4298,7 +4298,7 @@ Object.assign(FaceMesh, {
   },
   /* лист с превью камеры для заданий пациента */
   taskSheet(title) {
-    const vid = h('video', { autoplay: true, playsinline: true, class: 'mirror', style: 'width:100%;aspect-ratio:4/3;object-fit:cover;background:#000;border-radius:14px' }); vid.muted = true; vid.srcObject = Media.stream;
+    const vid = h('video', { autoplay: true, playsinline: true, class: 'mirror', style: 'width:100%;aspect-ratio:4/3;object-fit:cover;background:#000;border-radius:var(--r2)' }); vid.muted = true; vid.srcObject = Media.stream;
     const hint = h('div', { class: 'big-hint', role: 'status', 'aria-live': 'polite', text: '' });
     const prog = h('progress', { max: 1, value: 0, style: 'width:100%;height:12px' });
     const body = h('div', { class: 'stack' });
@@ -4383,7 +4383,7 @@ Object.assign(FaceMesh, {
           const cal = S.length >= 12 ? C.fromIris(S) : null;
           if (!cal) { T.body.replaceChildren(h('p', { text: 'Не удалось получить устойчивый кадр в анфасе. Повторите.' }), h('button', { class: 'btn pri', onclick: iris }, 'Повторить')); return; }
           T.hint.textContent = 'Приблизительно, погрешность выше';
-          T.body.replaceChildren(h('p', { style: 'margin:0', text: 'Межзрачковое расстояние: ' + cal.ipd_mm.toFixed(1) + ' мм (' + cal.label + ').' }),
+          T.body.replaceChildren(h('p', { style: 'margin:0', text: 'Межзрачковое расстояние: ' + cal.ipd_mm.toFixed(1).replace('.', ',') + ' мм (' + cal.label + ').' }),
             h('div', { class: 'row wrap' }, h('button', { class: 'btn pri', onclick: () => saveCal(cal) }, 'Сохранить'), h('button', { class: 'btn sec', onclick: menu }, 'Назад')));
         }
       }, 200);
@@ -4397,7 +4397,7 @@ Object.assign(FaceMesh, {
       const trk = this.trk, cur = trk && trk.cur, e = cur && this.Pose.euler(cur);
       if (!cur || trk.lost() || !this.Pose.inTol(e, this.tol)) { Toast.show('Нужен анфас в допуске: ' + (this.info && this.info.hint || 'смотрите прямо в камеру')); return; }
       const v = this.els.local, cv = document.createElement('canvas'); cv.width = v.videoWidth; cv.height = v.videoHeight; cv.getContext('2d').drawImage(v, 0, 0);
-      cv.style.cssText = 'width:100%;border-radius:14px;touch-action:none;cursor:crosshair'; const pts = [];
+      cv.style.cssText = 'width:100%;border-radius:var(--r2);touch-action:none;cursor:crosshair'; const pts = [];
       const names = ['левый верхний', 'правый верхний', 'правый нижний', 'левый нижний'];
       T.hint.textContent = 'Отметьте угол карты: ' + names[0];
       const ctx = cv.getContext('2d');
@@ -4410,7 +4410,7 @@ Object.assign(FaceMesh, {
         const cal = C.fromCard(pts, C.ipdPx(cur));
         if (!cal) { T.hint.textContent = 'Углы отмечены неверно'; T.body.replaceChildren(h('button', { class: 'btn pri', onclick: card }, 'Повторить')); return; }
         T.hint.textContent = '';
-        T.body.append(h('p', { style: 'margin:8px 0 0', text: 'Межзрачковое расстояние: ' + cal.ipd_mm.toFixed(1) + ' мм; масштаб ' + cal.mm_per_px.toFixed(4) + ' мм/пиксель.' + (cal.skew > 0.08 ? ' Пропорции карты искажены (' + (cal.skew * 100).toFixed(0) + '%): карта наклонена, точность снижена.' : '') }),
+        T.body.append(h('p', { style: 'margin:8px 0 0', text: 'Межзрачковое расстояние: ' + cal.ipd_mm.toFixed(1).replace('.', ',') + ' мм; масштаб ' + cal.mm_per_px.toFixed(4) + ' мм/пиксель.' + (cal.skew > 0.08 ? ' Пропорции карты искажены (' + (cal.skew * 100).toFixed(0) + '%): карта наклонена, точность снижена.' : '') }),
           h('div', { class: 'row wrap' }, h('button', { class: 'btn pri', onclick: () => saveCal(cal) }, 'Сохранить'), h('button', { class: 'btn sec', onclick: card }, 'Заново')));
       });
       T.body.replaceChildren(cv);
@@ -4513,7 +4513,7 @@ Object.assign(FaceMesh, {
     body.append(h('button', { class: 'btn pri', disabled: !this.consent || null, onclick: () => this.req('symmetry') }, 'Измерить симметрию'),
       h('div', { class: 'row wrap' }, h('button', { class: 'btn sec', disabled: !this.consent || null, onclick: () => this.req('mobility') }, 'Подвижность'), h('button', { class: 'btn sec', disabled: !this.consent || null, onclick: () => this.req('calibrate') }, 'Калибровка в мм')));
     if (!this.consent) body.append(h('p', { class: 'note', style: 'margin:0', text: 'Измерения станут доступны, когда пациент даст согласие на анализ лица.' }));
-    body.append(h('p', { class: 'note', style: 'margin:0', text: this.cal ? 'Калибровка: ' + this.cal.label + '; межзрачковое расстояние ' + this.cal.ipd_mm.toFixed(1) + ' мм.' : 'Калибровки нет: значения в миллиметрах не показываются.' }));
+    body.append(h('p', { class: 'note', style: 'margin:0', text: this.cal ? 'Калибровка: ' + this.cal.label + '; межзрачковое расстояние ' + this.cal.ipd_mm.toFixed(1).replace('.', ',') + ' мм.' : 'Калибровки нет: значения в миллиметрах не показываются.' }));
     if (L.symmetry) body.append(h('h3', { text: 'Симметрия' }), this.symDoses(L.symmetry), this.fold('Все значения симметрии', this.symTable(L.symmetry)));
     else body.append(h('p', { class: 'note', style: 'margin:0', text: 'Метрик симметрии в этом приёме пока нет.' }));
     if (L.mobility) body.append(h('h3', { text: 'Подвижность' }), this.mobDoses(L.mobility), this.fold('Все значения подвижности', this.mobTable(L.mobility)));
@@ -4663,7 +4663,7 @@ FaceMesh.Capture = {
     const vid = h('video', { autoplay: true, playsinline: true, class: 'mirror', style: 'position:absolute;inset:0;width:100%;height:100%;object-fit:cover' }); vid.muted = true; vid.srcObject = Media.stream;
     const ov = h('canvas', { style: 'position:absolute;inset:0;width:100%;height:100%;pointer-events:none' });
     const count = h('div', { style: 'position:absolute;inset:0;display:grid;place-items:center;font-size:96px;font-weight:700;color:#fff;text-shadow:0 0 8px rgba(0,0,0,.7);pointer-events:none' });
-    const stage = h('div', { style: 'position:relative;width:100%;aspect-ratio:3/4;max-height:62vh;background:#000;border-radius:14px;overflow:hidden;margin:0 auto' }, vid, ov, count);
+    const stage = h('div', { style: 'position:relative;width:100%;aspect-ratio:3/4;max-height:62vh;background:#000;border-radius:var(--r2);overflow:hidden;margin:0 auto' }, vid, ov, count);
     const title = h('div', { class: 'big-hint', role: 'status', 'aria-live': 'polite' });
     const sub = h('div', { class: 'note', style: 'text-align:center', 'aria-live': 'polite' });
     const prog = h('progress', { max: 1, value: 0, style: 'width:100%;height:12px' });
@@ -4891,7 +4891,7 @@ FaceMesh.Compare = {
     if (pose === 'frontal' && !mm) warn.push('Калибровки нет: значения даны в долях межзрачкового расстояния, не в миллиметрах.');
     if (mm && mm.approx) warn.push('Калибровка по радужке приблизительная: миллиметры ориентировочные. Для точности используйте калибровку по карте.');
     if (pose !== 'frontal') warn.push('Для ракурса, отличного от анфаса, миллиметры не показываются: расстояния искажены поворотом.');
-    const msg = h('div', { class: 'stack' }, warn.map(w => h('div', { class: 'banner warn', style: 'border-radius:10px', text: w })));
+    const msg = h('div', { class: 'stack' }, warn.map(w => h('div', { class: 'banner warn', style: 'border-radius:var(--r1)', text: w })));
     const saveBtn = h('button', { class: 'btn pri', disabled: !poseOk || null, onclick: async e => {
       e.target.disabled = true;
       const payload = { kind: 'compare', pose_ok: true, source: R.source, job_id: R.job_id, pose, before_id: before.id, after_id: after.id, before_ts: before.ts, after_ts: after.ts, norm: normName, scale: T.scale, rotation_deg: T.angle, tolerance: tol, rows: rows.map(r => { const o = { id: r.id, label: r.label, dx: r.dx, dy: r.dy }; if (mm) { o.dx_mm = r.dx_mm; o.dy_mm = r.dy_mm; } return o; }), ts: Math.floor(Date.now() / 1000) };
@@ -4941,7 +4941,7 @@ FaceMesh.Report = {
     const F = FaceMesh, rep = rp.rep;
     const kids = [h('h1', { text: rep.center }), h('h2', { text: 'Документирование лица: отчёт' }),
       h('table', null, h('tr', null, h('th', { text: 'Пациент' }), h('td', { text: rep.patient })), h('tr', null, h('th', { text: 'Дата' }), h('td', { text: rep.date })), h('tr', null, h('th', { text: 'Врач' }), h('td', { text: rep.doctor })),
-        h('tr', null, h('th', { text: 'Калибровка размеров' }), h('td', { text: rep.calibration ? rep.calibration.label + '; межзрачковое расстояние ' + rep.calibration.ipd_mm.toFixed(1) + ' мм' : 'нет (значения в миллиметрах не приводятся)' })))];
+        h('tr', null, h('th', { text: 'Калибровка размеров' }), h('td', { text: rep.calibration ? rep.calibration.label + '; межзрачковое расстояние ' + rep.calibration.ipd_mm.toFixed(1).replace('.', ',') + ' мм' : 'нет (значения в миллиметрах не приводятся)' })))];
     if (rep.symmetry) kids.push(h('h2', { text: 'Симметрия' }), F.symTable(rep.symmetry, true));
     if (rep.mobility) kids.push(h('h2', { text: 'Подвижность лица' }), F.mobTable(rep.mobility));
     if (rp.trends && rp.trends.length) { kids.push(h('h2', { text: 'Динамика между приёмами' })); for (const t of rp.trends) kids.push(h('img', { src: t.url, alt: t.title, style: 'max-height:60mm;display:block' })); }
@@ -4964,8 +4964,12 @@ FaceMesh.Report = {
     const F = FaceMesh, rep = rp.rep;
     const none = !rep.symmetry && !rep.mobility && !(rep.compare && rep.compare.length) && !rep.photo_ids.length && !rep.transcript;
     out.replaceChildren(
-      h('p', { class: 'note', style: 'margin:0', text: 'Отчёт сформирован ' + rep.date + '. Симметрия: ' + (rep.symmetry ? 'есть' : 'нет') + '; подвижность: ' + (rep.mobility ? 'есть' : 'нет') + '; сравнений: ' + (rep.compare || []).length + '; снимков: ' + rep.photo_ids.length + '; графиков: ' + (rp.trends || []).length + '; расшифровка: ' + (rep.transcript ? 'есть (обезличена)' : rep.transcript_note ? 'не проверена' : 'нет') + '.' }),
-      ...(none ? [h('div', { class: 'banner warn', style: 'border-radius:10px', text: 'В этом приёме пока нет данных для отчёта.' })] : []),
+      h('h3', { text: 'Отчёт от ' + rep.date }),
+      h('div', { class: 'row wrap', role: 'list', 'aria-label': 'Что вошло в отчёт' }, [['Симметрия', !!rep.symmetry], ['Подвижность', !!rep.mobility], ['Сравнения', (rep.compare || []).length], ['Снимки', rep.photo_ids.length], ['Графики', (rp.trends || []).length], ['Расшифровка', !!rep.transcript]]
+        .map(([k, v]) => h('span', { class: 'chip' + (v ? ' g' : ''), role: 'listitem', text: k + ': ' + (v === true ? 'есть' : v === false ? 'нет' : v) }))),
+      /* replaceChildren(null) выводит «null»: пустая строка не видна */
+      rep.transcript_note ? h('p', { class: 'note', style: 'margin:0', text: rep.transcript_note }) : '',
+      ...(none ? [h('div', { class: 'banner warn', style: 'border-radius:var(--r1)', text: 'В этом приёме пока нет данных для отчёта.' })] : []),
       h('div', { class: 'row wrap' },
         h('button', { class: 'btn pri', onclick: async () => {
           const node = this.node(rp);
@@ -4973,7 +4977,7 @@ FaceMesh.Report = {
           await Promise.all(imgs.map(i => i.decode ? i.decode().catch(() => { }) : Promise.resolve()));
           Print.go(node);
         } }, 'Печать или PDF'),
-        h('button', { class: 'btn sec', onclick: () => Ui.download('отчёт-лицо-' + (rep.appointment_id || 'приём') + '.json', JSON.stringify(rep, null, 2)) }, icon('download'), 'Скачать JSON'),
+        h('button', { class: 'btn sec', onclick: () => Ui.download('отчёт-лицо-' + (rep.appointment_id || 'приём') + '.json', JSON.stringify(rep, null, 2)) }, icon('download'), 'Данные отчёта (JSON)'),
         h('button', { class: 'btn sec', onclick: async e => { e.target.disabled = true; try { await Api.post('/rooms/' + Api.room + '/measurements', rep); Toast.show('Отчёт сохранён в протокол'); } catch (er) { Toast.err(er); } e.target.disabled = false; } }, 'Сохранить в протокол')));
   }
 };
@@ -5129,7 +5133,7 @@ const Transcript = {
     if (!(await Ui.confirm('Показать оригинал?', 'Исходная расшифровка содержит личные данные пациента. Просмотр записывается в журнал аудита.', 'Показать'))) return;
     let r; try { r = await Api.get('/rooms/' + Api.room + '/transcript/original'); } catch (e) { Toast.err(e); return; }
     const s = Ui.sheet({ title: 'Исходная расшифровка', wide: true });
-    s.el.append(h('div', { class: 'banner warn', style: 'border-radius:10px', text: 'Содержит личные данные. Не копируйте этот текст в отчёт.' }), this.list(r.segments, false));
+    s.el.append(h('div', { class: 'banner warn', style: 'border-radius:var(--r1)', text: 'Содержит личные данные. Не копируйте этот текст в отчёт.' }), this.list(r.segments, false));
   },
   addSheet() {
     const sel = (window.getSelection && String(window.getSelection())).trim();
@@ -5164,10 +5168,11 @@ const Transcript = {
     const d = this.d, st = this.st, kids = [];
     if (!d) { el.replaceChildren(h('p', { class: 'mut', text: 'Загрузка...' })); return; }
     const live = st && st.chunks ? 'Кусков записи: ' + st.chunks + ', расшифровано: ' + st.done + (st.queued ? ', в очереди: ' + st.queued : '') + '.' : '';
-    if (d.status === 'none') kids.push(h('p', { style: 'margin:0', text: 'Обезличенной расшифровки пока нет. Она появится после завершения приёма, если пациент дал согласие на расшифровку речи.' }), live ? h('p', { class: 'note', style: 'margin:0', text: live }) : null);
-    if (d.status === 'queued') kids.push(h('div', { class: 'banner', style: 'border-radius:10px', role: 'status', text: d.waiting ? 'Сервис обезличивания временно недоступен. Расшифровка сохранена и будет обезличена, когда сервис заработает.' : 'Идёт обезличивание расшифровки. На процессоре это может занять несколько минут.' }));
-    if (d.status === 'error') kids.push(h('div', { class: 'banner bad', style: 'border-radius:10px', text: 'Не удалось обезличить: ' + ((d.error && d.error.message) || 'ошибка') + '.' }));
-    if (st && (st.error || st.cancelled)) kids.push(h('div', { class: 'banner warn', style: 'border-radius:10px', text: 'Расшифровка неполная: ' + (st.error ? 'не удалось расшифровать кусков записи — ' + st.error : '') + (st.error && st.cancelled ? '; ' : '') + (st.cancelled ? 'удалено после отзыва согласия — ' + st.cancelled : '') + '.' }));
+    if (d.status === 'none') kids.push(h('p', { style: 'margin:0', text: 'Обезличенной расшифровки пока нет. Она появится после завершения приёма, если пациент дал согласие на расшифровку речи.' }), live ? h('p', { class: 'note', style: 'margin:0', text: live }) : null,
+      Speech.on ? null : h('button', { class: 'btn pri', style: 'align-self:flex-start', onclick: () => Speech.request() }, icon('audio'), 'Запросить согласие на расшифровку'));
+    if (d.status === 'queued') kids.push(h('div', { class: 'banner', style: 'border-radius:var(--r1)', role: 'status', text: d.waiting ? 'Сервис обезличивания временно недоступен. Расшифровка сохранена и будет обезличена, когда сервис заработает.' : 'Идёт обезличивание расшифровки. На процессоре это может занять несколько минут.' }));
+    if (d.status === 'error') kids.push(h('div', { class: 'banner bad', style: 'border-radius:var(--r1)', text: 'Не удалось обезличить: ' + ((d.error && d.error.message) || 'ошибка') + '.' }));
+    if (st && (st.error || st.cancelled)) kids.push(h('div', { class: 'banner warn', style: 'border-radius:var(--r1)', text: 'Расшифровка неполная: ' + (st.error ? 'не удалось расшифровать кусков записи — ' + st.error : '') + (st.error && st.cancelled ? '; ' : '') + (st.cancelled ? 'удалено после отзыва согласия — ' + st.cancelled : '') + '.' }));
     const btns = [];
     if (d.status === 'done') {
       kids.push(h('div', { class: 'row wrap', style: 'gap:8px' }, d.confirmed ? h('span', { class: 'chip g', text: 'Проверено врачом, идёт в отчёт' }) : h('span', { class: 'chip o', text: 'Не проверено: в отчёт не попадает' }),

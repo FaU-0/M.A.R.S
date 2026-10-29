@@ -401,7 +401,7 @@ const Session = {
   },
   async precheck() {
     State.set({ view: 'precheck' }); Header.update();
-    const vid = h('video', { autoplay: true, muted: true, playsinline: true, class: 'mirror', style: 'width:100%;aspect-ratio:4/3;object-fit:cover;background:#000;border-radius:14px' });
+    const vid = h('video', { autoplay: true, muted: true, playsinline: true, class: 'mirror', style: 'width:100%;aspect-ratio:4/3;object-fit:cover;background:#000;border-radius:var(--r2)' });
     const msg = h('div', { class: 'banner warn hidden', role: 'alert' });
     const meter = h('div', { class: 'meter', role: 'progressbar', 'aria-label': 'Уровень микрофона' }, h('i'));
     const selV = h('select', { class: 'inp' }), selA = h('select', { class: 'inp' });

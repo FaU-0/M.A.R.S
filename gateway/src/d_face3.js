@@ -47,7 +47,7 @@ FaceMesh.Capture = {
     const vid = h('video', { autoplay: true, playsinline: true, class: 'mirror', style: 'position:absolute;inset:0;width:100%;height:100%;object-fit:cover' }); vid.muted = true; vid.srcObject = Media.stream;
     const ov = h('canvas', { style: 'position:absolute;inset:0;width:100%;height:100%;pointer-events:none' });
     const count = h('div', { style: 'position:absolute;inset:0;display:grid;place-items:center;font-size:96px;font-weight:700;color:#fff;text-shadow:0 0 8px rgba(0,0,0,.7);pointer-events:none' });
-    const stage = h('div', { style: 'position:relative;width:100%;aspect-ratio:3/4;max-height:62vh;background:#000;border-radius:14px;overflow:hidden;margin:0 auto' }, vid, ov, count);
+    const stage = h('div', { style: 'position:relative;width:100%;aspect-ratio:3/4;max-height:62vh;background:#000;border-radius:var(--r2);overflow:hidden;margin:0 auto' }, vid, ov, count);
     const title = h('div', { class: 'big-hint', role: 'status', 'aria-live': 'polite' });
     const sub = h('div', { class: 'note', style: 'text-align:center', 'aria-live': 'polite' });
     const prog = h('progress', { max: 1, value: 0, style: 'width:100%;height:12px' });
@@ -275,7 +275,7 @@ FaceMesh.Compare = {
     if (pose === 'frontal' && !mm) warn.push('Калибровки нет: значения даны в долях межзрачкового расстояния, не в миллиметрах.');
     if (mm && mm.approx) warn.push('Калибровка по радужке приблизительная: миллиметры ориентировочные. Для точности используйте калибровку по карте.');
     if (pose !== 'frontal') warn.push('Для ракурса, отличного от анфаса, миллиметры не показываются: расстояния искажены поворотом.');
-    const msg = h('div', { class: 'stack' }, warn.map(w => h('div', { class: 'banner warn', style: 'border-radius:10px', text: w })));
+    const msg = h('div', { class: 'stack' }, warn.map(w => h('div', { class: 'banner warn', style: 'border-radius:var(--r1)', text: w })));
     const saveBtn = h('button', { class: 'btn pri', disabled: !poseOk || null, onclick: async e => {
       e.target.disabled = true;
       const payload = { kind: 'compare', pose_ok: true, source: R.source, job_id: R.job_id, pose, before_id: before.id, after_id: after.id, before_ts: before.ts, after_ts: after.ts, norm: normName, scale: T.scale, rotation_deg: T.angle, tolerance: tol, rows: rows.map(r => { const o = { id: r.id, label: r.label, dx: r.dx, dy: r.dy }; if (mm) { o.dx_mm = r.dx_mm; o.dy_mm = r.dy_mm; } return o; }), ts: Math.floor(Date.now() / 1000) };
@@ -325,7 +325,7 @@ FaceMesh.Report = {
     const F = FaceMesh, rep = rp.rep;
     const kids = [h('h1', { text: rep.center }), h('h2', { text: 'Документирование лица: отчёт' }),
       h('table', null, h('tr', null, h('th', { text: 'Пациент' }), h('td', { text: rep.patient })), h('tr', null, h('th', { text: 'Дата' }), h('td', { text: rep.date })), h('tr', null, h('th', { text: 'Врач' }), h('td', { text: rep.doctor })),
-        h('tr', null, h('th', { text: 'Калибровка размеров' }), h('td', { text: rep.calibration ? rep.calibration.label + '; межзрачковое расстояние ' + rep.calibration.ipd_mm.toFixed(1) + ' мм' : 'нет (значения в миллиметрах не приводятся)' })))];
+        h('tr', null, h('th', { text: 'Калибровка размеров' }), h('td', { text: rep.calibration ? rep.calibration.label + '; межзрачковое расстояние ' + rep.calibration.ipd_mm.toFixed(1).replace('.', ',') + ' мм' : 'нет (значения в миллиметрах не приводятся)' })))];
     if (rep.symmetry) kids.push(h('h2', { text: 'Симметрия' }), F.symTable(rep.symmetry, true));
     if (rep.mobility) kids.push(h('h2', { text: 'Подвижность лица' }), F.mobTable(rep.mobility));
     if (rp.trends && rp.trends.length) { kids.push(h('h2', { text: 'Динамика между приёмами' })); for (const t of rp.trends) kids.push(h('img', { src: t.url, alt: t.title, style: 'max-height:60mm;display:block' })); }
@@ -348,8 +348,12 @@ FaceMesh.Report = {
     const F = FaceMesh, rep = rp.rep;
     const none = !rep.symmetry && !rep.mobility && !(rep.compare && rep.compare.length) && !rep.photo_ids.length && !rep.transcript;
     out.replaceChildren(
-      h('p', { class: 'note', style: 'margin:0', text: 'Отчёт сформирован ' + rep.date + '. Симметрия: ' + (rep.symmetry ? 'есть' : 'нет') + '; подвижность: ' + (rep.mobility ? 'есть' : 'нет') + '; сравнений: ' + (rep.compare || []).length + '; снимков: ' + rep.photo_ids.length + '; графиков: ' + (rp.trends || []).length + '; расшифровка: ' + (rep.transcript ? 'есть (обезличена)' : rep.transcript_note ? 'не проверена' : 'нет') + '.' }),
-      ...(none ? [h('div', { class: 'banner warn', style: 'border-radius:10px', text: 'В этом приёме пока нет данных для отчёта.' })] : []),
+      h('h3', { text: 'Отчёт от ' + rep.date }),
+      h('div', { class: 'row wrap', role: 'list', 'aria-label': 'Что вошло в отчёт' }, [['Симметрия', !!rep.symmetry], ['Подвижность', !!rep.mobility], ['Сравнения', (rep.compare || []).length], ['Снимки', rep.photo_ids.length], ['Графики', (rp.trends || []).length], ['Расшифровка', !!rep.transcript]]
+        .map(([k, v]) => h('span', { class: 'chip' + (v ? ' g' : ''), role: 'listitem', text: k + ': ' + (v === true ? 'есть' : v === false ? 'нет' : v) }))),
+      /* replaceChildren(null) выводит «null»: пустая строка не видна */
+      rep.transcript_note ? h('p', { class: 'note', style: 'margin:0', text: rep.transcript_note }) : '',
+      ...(none ? [h('div', { class: 'banner warn', style: 'border-radius:var(--r1)', text: 'В этом приёме пока нет данных для отчёта.' })] : []),
       h('div', { class: 'row wrap' },
         h('button', { class: 'btn pri', onclick: async () => {
           const node = this.node(rp);
@@ -357,7 +361,7 @@ FaceMesh.Report = {
           await Promise.all(imgs.map(i => i.decode ? i.decode().catch(() => { }) : Promise.resolve()));
           Print.go(node);
         } }, 'Печать или PDF'),
-        h('button', { class: 'btn sec', onclick: () => Ui.download('отчёт-лицо-' + (rep.appointment_id || 'приём') + '.json', JSON.stringify(rep, null, 2)) }, icon('download'), 'Скачать JSON'),
+        h('button', { class: 'btn sec', onclick: () => Ui.download('отчёт-лицо-' + (rep.appointment_id || 'приём') + '.json', JSON.stringify(rep, null, 2)) }, icon('download'), 'Данные отчёта (JSON)'),
         h('button', { class: 'btn sec', onclick: async e => { e.target.disabled = true; try { await Api.post('/rooms/' + Api.room + '/measurements', rep); Toast.show('Отчёт сохранён в протокол'); } catch (er) { Toast.err(er); } e.target.disabled = false; } }, 'Сохранить в протокол')));
   }
 };
