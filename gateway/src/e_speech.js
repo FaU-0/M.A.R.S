@@ -17,7 +17,7 @@ const Speech = {
     if (on === this.on) return this.paint();
     this.on = on;
     if (on) {
-      if (!this.mime() || !Media.stream || !Media.stream.getAudioTracks().length) { this.on = false; Toast.show('Запись речи недоступна в этом браузере'); return this.paint(); }
+      if (!this.mime() || !Media.stream || !Media.stream.getAudioTracks().length) { this.on = false; Toast.show(T('Запись речи недоступна в этом браузере')); return this.paint(); }
       this.sid = Remote_key(); this.seq = 0; this.t00 = performance.now(); this.cycle();
       if (State.v.role === 'doctor') { clearInterval(this.poll); this.poll = setInterval(() => this.refresh(), 10000); this.refresh(); }
     } else {
@@ -33,7 +33,7 @@ const Speech = {
     if (!tr) { this.set(false); return; }
     let rec;
     try { rec = new MediaRecorder(new MediaStream([tr]), { mimeType: this.mime(), audioBitsPerSecond: 32000 }); }
-    catch (e) { console.warn('MediaRecorder', e); this.on = false; this.paint(); Toast.show('Не удалось начать запись речи'); return; }
+    catch (e) { console.warn('MediaRecorder', e); this.on = false; this.paint(); Toast.show(T('Не удалось начать запись речи')); return; }
     const parts = [], t0 = performance.now(), t00 = this.t00, sid = this.sid, seq = this.seq++;
     rec.ondataavailable = e => { if (e.data && e.data.size) parts.push(e.data); };
     rec.onstop = () => {
@@ -76,35 +76,35 @@ const Speech = {
     const c = this.chip; if (!c) return;
     const st = this.st, doc = State.v.role === 'doctor';
     let txt = '';
-    if (this.on) txt = '● Идёт расшифровка речи';
-    else if (doc && st && st.queued) txt = 'Расшифровка: в очереди ' + st.queued;
-    if (txt && doc && st && st.chunks) txt += ' · ' + st.done + ' из ' + st.chunks + (st.service_up === false ? ' · сервис недоступен, куски сохранены' : '');
-    if (this.on && this.q.length > 1) txt += ' · не отправлено ' + this.q.length;
+    if (this.on) txt = T('● Идёт расшифровка речи');
+    else if (doc && st && st.queued) txt = T('Расшифровка: в очереди ') + st.queued;
+    if (txt && doc && st && st.chunks) txt += ' · ' + st.done + T(' из ') + st.chunks + (st.service_up === false ? T(' · сервис недоступен, куски сохранены') : '');
+    if (this.on && this.q.length > 1) txt += T(' · не отправлено ') + this.q.length;
     c.textContent = txt; c.classList.toggle('hidden', !txt);
-    c.title = doc ? 'Остановить расшифровку' : 'Остановить расшифровку (отозвать согласие)';
+    c.title = doc ? T('Остановить расшифровку') : T('Остановить расшифровку (отозвать согласие)');
     c.setAttribute('aria-label', txt + '. ' + c.title);
   },
   async chipClick() {
     if (!this.on) return;
     if (State.v.role === 'doctor') return this.stopByDoctor();
-    if (!(await Ui.confirm('Остановить расшифровку?', 'Запись вашей речи прекратится. Уже расшифрованный текст останется у врача.', 'Остановить', true))) return;
+    if (!(await Ui.confirm(T('Остановить расшифровку?'), T('Запись вашей речи прекратится. Уже расшифрованный текст останется у врача.'), T('Остановить'), true))) return;
     this.answer(false);
   },
   /* врач: запросить согласие или остановить */
   async request() {
     if (this.on) return this.stopByDoctor();
-    try { await Api.ev('control', { action: 'speech_request' }); Toast.show('Пациенту отправлен запрос на согласие'); } catch (e) { Toast.err(e); }
+    try { await Api.ev('control', { action: 'speech_request' }); Toast.show(T('Пациенту отправлен запрос на согласие')); } catch (e) { Toast.err(e); }
   },
   async stopByDoctor() { try { await Api.ev('control', { action: 'speech_stop' }); } catch (e) { Toast.err(e); } },
   /* пациент: лист согласия */
   ask() {
     const s = Ui.sheet({
-      title: 'Согласие на расшифровку речи',
-      actions: [{ label: 'Не согласен(на)', kind: 'sec', onClick: () => this.answer(false) }, { label: 'Согласен(на)', kind: 'pri', onClick: () => this.answer(true) }]
+      title: T('Согласие на расшифровку речи'),
+      actions: [{ label: T('Не согласен(на)'), kind: 'sec', onClick: () => this.answer(false) }, { label: T('Согласен(на)'), kind: 'pri', onClick: () => this.answer(true) }]
     });
-    s.el.append(h('p', { style: 'margin:0', text: 'Врач просит включить расшифровку консультации. Что происходит: ваш микрофон записывается кусками по 10 секунд и отправляется на сервер медицинского центра, где речь переводится в текст.' }),
-      h('p', { style: 'margin:0', text: 'Аудиозапись удаляется сразу после расшифровки. Текст видит только врач; в отчёт он попадёт только без ваших личных данных.' }),
-      h('p', { class: 'note', style: 'margin:0', text: 'Согласие можно отозвать в любой момент: нажмите на индикатор «Идёт расшифровка речи» вверху экрана.' }));
+    s.el.append(h('p', { style: 'margin:0', text: T('Врач просит включить расшифровку консультации. Что происходит: ваш микрофон записывается кусками по 10 секунд и отправляется на сервер медицинского центра, где речь переводится в текст.') }),
+      h('p', { style: 'margin:0', text: T('Аудиозапись удаляется сразу после расшифровки. Текст видит только врач; в отчёт он попадёт только без ваших личных данных.') }),
+      h('p', { class: 'note', style: 'margin:0', text: T('Согласие можно отозвать в любой момент: нажмите на индикатор «Идёт расшифровка речи» вверху экрана.') }));
   },
   async answer(g) { try { await Api.ev('control', { action: 'speech_consent', granted: g }); } catch (e) { Toast.err(e); } },
   /* события control от сервера */
@@ -112,10 +112,10 @@ const Speech = {
     if (d.action === 'speech_request') { if (State.v.role === 'patient') this.ask(); return; }
     if (d.action === 'speech_consent') {
       this.consent = !!d.granted; this.set(!!d.granted);
-      if (State.v.role === 'doctor') Toast.show(d.granted ? 'Пациент согласился на расшифровку речи' : 'Пациент отказался от расшифровки речи');
+      if (State.v.role === 'doctor') Toast.show(d.granted ? T('Пациент согласился на расшифровку речи') : T('Пациент отказался от расшифровки речи'));
       return;
     }
-    if (d.action === 'speech_stop') { this.set(false); if (State.v.role === 'patient') Toast.show('Врач остановил расшифровку речи'); }
+    if (d.action === 'speech_stop') { this.set(false); if (State.v.role === 'patient') Toast.show(T('Врач остановил расшифровку речи')); }
   },
   stop() { this.set(false); }
 };

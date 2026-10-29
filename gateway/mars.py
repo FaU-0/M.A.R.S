@@ -2353,6 +2353,850 @@ table.tb td.n,table.tb th.n{text-align:right;font-variant-numeric:tabular-nums}
 <div id="toasts" aria-live="polite"></div>
 <div id="printArea"></div>
 <script>
+/* ===== Язык интерфейса: русский (исходный) и английский =====
+   Все строки интерфейса пишутся по-русски и проходят через T(); словарь EN переводит их на английский.
+   Язык: ?lang=en в адресе, затем выбор пользователя (localStorage), иначе русский. Сообщения сервера переводятся тем же словарём. */
+const LANGS = ['ru', 'en'];
+const LANG = (() => {
+  try { const q = new URLSearchParams(location.search).get('lang'); if (LANGS.includes(q)) { localStorage.setItem('mars_lang', q); return q; } } catch (e) { /* без хранилища */ }
+  try { const s = localStorage.getItem('mars_lang'); if (LANGS.includes(s)) return s; } catch (e) { /* без хранилища */ }
+  return 'ru';
+})();
+document.documentElement.lang = LANG;
+/* десятичный разделитель в показанных числах */
+const DEC = LANG === 'ru' ? ',' : '.';
+const EN = {
+  "Администратор": "Administrator",
+  "Сменить язык?": "Change language?",
+  "Страница перезагрузится, звонок подключится заново.": "The page will reload and the call will reconnect.",
+  "Сменить": "Change",
+  " (1 — одинаково)": " (1 means equal)",
+  " (МЗР / мм)": " (IPD / mm)",
+  " (доли МЗР)": " (IPD fractions)",
+  " (обе стороны, модель не разделяет)": " (both sides, the model does not separate them)",
+  " · не отправлено ": " · not sent ",
+  " · сервис недоступен, куски сохранены": " · service unavailable, chunks saved",
+  " Автокадрирование по лицу (только у вас)": " Auto-framing on the face (only on your side)",
+  " До: ": " Before: ",
+  " Источник масштаба: ": " Scale source: ",
+  " КБ": " KB",
+  " Калибровки нет: значения в мм не показываются.": " No calibration: values in mm are not shown.",
+  " МБ": " MB",
+  " Накладывать сетку на снимок": " Overlay the mesh on the photo",
+  " Наложить контуры на снимок": " Overlay contours on the photo",
+  " Поза на устройстве пациента: ": " Pose on the patient's device: ",
+  " После: ": " After: ",
+  " Пропорции карты искажены (": " Card proportions are distorted (",
+  " Рассчитано на устройстве.": " Calculated on the device.",
+  " Рассчитано сервисом анализа.": " Calculated by the analysis service.",
+  " Сетка и на самовидении": " Mesh on the self view too",
+  " Скрыть лицо (пикселизация до отправки)": " Hide the face (pixelate before sending)",
+  " Скрыть лицо при сохранении": " Hide the face when saving",
+  " Стрелки смещения ключевых точек": " Offset arrows for key points",
+  " градусов от цели (до: ": " degrees from the target (before: ",
+  " градусов).": " degrees).",
+  " градусов.": " degrees.",
+  " замеров": " measurements",
+  " из ": " of ",
+  " мм": " mm",
+  " мм (": " mm (",
+  " мм.": " mm.",
+  " мм/пиксель.": " mm/pixel.",
+  " мм; масштаб ": " mm; scale ",
+  "%): карта наклонена, точность снижена.": "%): the card is tilted, accuracy is reduced.",
+  "). Результат ориентировочный и в протокол не сохраняется.": "). The result is approximate and is not saved to the record.",
+  ", в очереди: ": ", queued: ",
+  ", поворот ": ", rotation ",
+  ", расшифровано: ": ", transcribed: ",
+  ". Видеозвонок продолжает работать.": ". The video call keeps working.",
+  ". Единицы: ": ". Units: ",
+  ". Если снимок был сохранён со скрытым лицом, сравнить его нельзя.": ". If the photo was saved with the face hidden, it cannot be compared.",
+  ". Нажмите «Начать»": ". Press “Start”",
+  ". Попросите пациента отвернуться и снова сесть прямо": ". Ask the patient to turn away and sit up straight again",
+  ". После: ": ". After: ",
+  ". Профиль 90 градусов система не отслеживает: снимок делается вручную.": ". The system does not track a 90 degree profile: the photo is taken manually.",
+  ". Следующий запрос уйдёт пациенту автоматически.": ". The next request will go to the patient automatically.",
+  ". Снимок «после» совмещён со снимком «до» по жёстким точкам (масштаб ": ". The “after” photo is aligned to the “before” photo by rigid points (scale ",
+  ". Снимок сделается сам после удержания позы в допуске ": ". The photo is taken automatically after the pose is held within ",
+  "3 замера": "3 measurements",
+  "; межзрачковое расстояние ": "; interpupillary distance ",
+  "; после: ": "; after: ",
+  "Email для приглашения": "Email for the invitation",
+  "GPU недоступен, использую CPU": "GPU unavailable, using CPU",
+  "HL7 FHIR R4: пациент и наблюдения для медицинской информационной системы": "HL7 FHIR R4: patient and observations for a clinical information system",
+  "JSON для МИС": "JSON for the clinic system",
+  "M.A.R.S., расчёт: ": "M.A.R.S., calculated by: ",
+  "PDF, JPEG, PNG, CSV, XLSX, XLS, до 20 МБ.": "PDF, JPEG, PNG, CSV, XLSX, XLS, up to 20 MB.",
+  "SD — разброс замеров у одного человека. MDC95 — минимальное различимое изменение: если между приёмами разность изменилась меньше, это не отличить от разброса измерения. ": "SD is the spread of measurements on one person. MDC95 is the minimal detectable change: if the difference between appointments changed by less than this, it cannot be told apart from the measurement spread. ",
+  "fhir-лицо-": "fhir-face-",
+  "«Измерить симметрию»: пациент держит голову прямо, числа приходят сюда": "“Measure symmetry”: the patient holds the head straight, the numbers arrive here",
+  "«Калибровка в мм» — если нужны миллиметры, а не доли МЗР": "“Calibration in mm” if you need millimetres rather than IPD fractions",
+  "«Подвижность» и снимки по ракурсам (раздел «Съёмка») — по необходимости": "“Mobility” and photos by view (the “Photos” section) as needed",
+  "Автоматическая отправка писем не настроена (SMTP не задан).": "Automatic email sending is not configured (SMTP is not set).",
+  "Адрес (обязательно)": "Address (required)",
+  "Аллергии": "Allergies",
+  "Аллергический ринит неуточнённый": "Allergic rhinitis, unspecified",
+  "Анализ временно недоступен, снимок сохранён и будет обработан позже. Сейчас показан расчёт на этом устройстве": "Analysis is temporarily unavailable; the photo is saved and will be processed later. The calculation on this device is shown now",
+  "Анамнез": "History",
+  "Анфас": "Frontal",
+  "Астма неуточнённая": "Asthma, unspecified",
+  "Атеросклеротическая болезнь сердца": "Atherosclerotic heart disease",
+  "Атопический дерматит неуточнённый": "Atopic dermatitis, unspecified",
+  "Аудио не в base64": "Audio is not base64",
+  "Аудиозапись удаляется сразу после расшифровки. Текст видит только врач; в отчёт он попадёт только без ваших личных данных.": "The audio is deleted right after transcription. Only the doctor sees the text; it goes into the report only without your personal data.",
+  "База данных временно недоступна": "The database is temporarily unavailable",
+  "Без имени": "No name",
+  "Без калибровки значения даны в долях межзрачкового расстояния (МЗР): 0,100 — одна десятая расстояния между зрачками этого пациента. Так значения сравнимы между приёмами, даже если пациент сидел дальше или ближе к камере. Чтобы видеть миллиметры, запросите калибровку.": "Without calibration, values are fractions of the interpupillary distance (IPD): 0.100 is one tenth of the distance between this patient's pupils. This keeps values comparable between visits even if the patient sat farther from or closer to the camera. To see millimetres, request a calibration.",
+  "Без калибровки показываются только безразмерные индексы. Калибровка нужна для значений в миллиметрах и действует только в анфасе.": "Without calibration only dimensionless indices are shown. Calibration is needed for values in millimetres and applies only to the frontal view.",
+  "Боль в области шеи": "Cervicalgia",
+  "Боль в суставе": "Pain in joint",
+  "Боль внизу спины": "Low back pain",
+  "В записи не найдено речи.": "No speech found in the recording.",
+  "В кадре несколько лиц: используется самое крупное. ": "Several faces in the frame: the largest one is used. ",
+  "В комнате уже есть пациент": "There is already a patient in the room",
+  "В комнате уже есть пациент. Если это вы, обратитесь в центр.": "There is already a patient in the room. If it is you, contact the center.",
+  "В сети": "Online",
+  "В этом приёме пока нет данных для отчёта.": "No data for a report in this appointment yet.",
+  "Варикозное расширение вен нижних конечностей": "Varicose veins of lower extremities",
+  "Ваше видео": "Your video",
+  "Введите код из приглашения": "Enter the code from the invitation",
+  "Введите фрагмент": "Enter a fragment",
+  "Вернуться": "Go back",
+  "Видео": "Video",
+  "Видео обрабатывается на вашем устройстве. Врачу уходят только числа и снимки, которые вы подтвердили.": "Video is processed on your device. Only the numbers and photos you confirm are sent to the doctor.",
+  "Видео собеседника": "Remote video",
+  "Видеосвязь будет закрыта. Затем можно заполнить заключение.": "The video call will be closed. Then you can fill in the report.",
+  "Видны только врачу": "Visible to the doctor only",
+  "Вирусная инфекция неуточнённая": "Viral infection, unspecified",
+  "Включить расшифровку речи": "Turn on speech transcription",
+  "Включить режим «Только аудио»": "Turn on “Audio only”",
+  "Внешние уголки глаз: расстояние до средней линии": "Outer eye corners: distance to the midline",
+  "Внутренние уголки глаз: расстояние до средней линии": "Inner eye corners: distance to the midline",
+  "Внутренняя ошибка сервера": "Internal server error",
+  "Внутренняя ошибка сервиса": "Internal service error",
+  "Войдите заново: ссылка врача действует только с его сессией": "Sign in again: the doctor's link works only with the doctor's session",
+  "Войти": "Sign in",
+  "Войти в комнату ожидания": "Enter the waiting room",
+  "Восстанавливаю связь": "Reconnecting",
+  "Врач": "Doctor",
+  "Врач завершил сеанс. Данные на экране очищены.": "The doctor ended the session. On-screen data has been cleared.",
+  "Врач может попросить вас выполнить несколько простых заданий перед камерой: фотосъёмку и проверку подвижности лица. Для этого нужно отдельное согласие на анализ лица.": "The doctor may ask you to do a few simple tasks in front of the camera: photos and a facial mobility check. This requires a separate consent to face analysis.",
+  "Врач остановил расшифровку речи": "The doctor stopped speech transcription",
+  "Врач просит включить расшифровку консультации. Что происходит: ваш микрофон записывается кусками по 10 секунд и отправляется на сервер медицинского центра, где речь переводится в текст.": "The doctor asks to turn on transcription of the consultation. What happens: your microphone is recorded in 10-second chunks and sent to the medical center's server, where speech is converted to text.",
+  "Врач просит выполнить: ": "The doctor asks you to do: ",
+  "Врач скоро подключится": "The doctor will join soon",
+  "Врач центра": "Center doctor",
+  "Врач: ": "Doctor: ",
+  "Время": "Time",
+  "Все замеры откалиброваны, значения в миллиметрах.": "All measurements are calibrated, values in millimetres.",
+  "Все значения подвижности": "All mobility values",
+  "Все значения симметрии": "All symmetry values",
+  "Вход для врача": "Doctor sign-in",
+  "Входные данные задания не найдены": "Job input not found",
+  "Вы вышли из консультации": "You left the consultation",
+  "Вы подтверждаете каждый результат перед отправкой.": "You confirm each result before it is sent.",
+  "Вы сможете вернуться по той же ссылке, пока врач не завершит приём.": "You can come back with the same link until the doctor ends the appointment.",
+  "Выберите хотя бы один ракурс": "Select at least one view",
+  "Выбрать снимок ": "Select photo ",
+  "Выделите фрагмент текста": "Select a text fragment",
+  "Выйти": "Sign out",
+  "Выкл": "Off",
+  "Выключить подсказки позы": "Turn off pose hints",
+  "Выключить режим «Только аудио»": "Turn off “Audio only”",
+  "Выровняйте голову": "Straighten your head",
+  "Выровняйте голову: ": "Straighten your head: ",
+  "Высота бровей над линией глаз": "Eyebrow height above the eye line",
+  "Высота бровей: разность": "Eyebrow height: difference",
+  "Высота уголков рта относительно линии глаз": "Mouth corner height relative to the eye line",
+  "Гастрит неуточнённый": "Gastritis, unspecified",
+  "Гастроэзофагеальный рефлюкс без эзофагита": "Gastro-oesophageal reflux disease without oesophagitis",
+  "Гиперлипидемия неуточнённая": "Hyperlipidaemia, unspecified",
+  "Гипотиреоз неуточнённый": "Hypothyroidism, unspecified",
+  "Головная боль": "Headache",
+  "Город, улица, дом, квартира": "City, street, building, apartment",
+  "Готово": "Done",
+  "Графики": "Charts",
+  "Группа крови": "Blood type",
+  "Данные отчёта (JSON)": "Report data (JSON)",
+  "Данных по предыдущим приёмам пока нет. Графики появятся после нескольких измерений.": "No data from previous appointments yet. Charts will appear after several measurements.",
+  "Дата": "Date",
+  "Дата и время": "Date and time",
+  "Дата повторного контакта": "Follow-up contact date",
+  "Дата повторного контакта: ГГГГ-ММ-ДД": "Follow-up date: YYYY-MM-DD",
+  "Дата рождения": "Date of birth",
+  "Действие": "Action",
+  "Демонстрация экрана": "Screen sharing",
+  "Демонстрация экрана не поддерживается этим браузером": "Screen sharing is not supported by this browser",
+  "Депрессивный эпизод неуточнённый": "Depressive episode, unspecified",
+  "Держите голову неподвижно": "Keep your head still",
+  "Держите карту у лба или щеки, лицо анфас": "Hold the card against your forehead or cheek, face the camera",
+  "Держите позу": "Hold the pose",
+  "Деталь": "Detail",
+  "Диагноз": "Diagnosis",
+  "Диалог": "Dialog",
+  "Динамика между приёмами": "Changes between appointments",
+  "Для ракурса, отличного от анфаса, миллиметры не показываются: расстояния искажены поворотом.": "Millimetres are not shown for views other than frontal: distances are distorted by the turn.",
+  "Для съёмки нужна включённая камера": "The camera must be on to take photos",
+  "До: ": "Before: ",
+  "Добавить замену": "Add replacement",
+  "Добавьте света спереди": "Add light in front of you",
+  "Документ содержит числовые наблюдения для документирования. Он не является диагнозом и не заменяет клинической оценки врача. ": "This document contains numeric observations for documentation. It is not a diagnosis and does not replace the doctor's clinical assessment. ",
+  "Документ сформирован по результатам дистанционной консультации. Это заключение консультации, а не электронный рецепт.": "Document produced after a remote consultation. This is a consultation report, not an electronic prescription.",
+  "Документирование лица: отчёт": "Face documentation: report",
+  "Допуск по углам, градусы (анфас: 5)": "Angle tolerance, degrees (frontal: 5)",
+  "Допустимы PDF, JPEG, PNG, CSV, XLSX, XLS": "Allowed: PDF, JPEG, PNG, CSV, XLSX, XLS",
+  "Достигнут лимит активных комнат": "Active room limit reached",
+  "Достигнут лимит загрузок для этого приёма": "Upload limit for this appointment reached",
+  "Доступ к камере или микрофону запрещён. Разрешите его в настройках браузера (значок замка рядом с адресом) и нажмите «Повторить».": "Access to the camera or microphone is blocked. Allow it in the browser settings (the lock icon next to the address) and click “Retry”.",
+  "Другое": "Other",
+  "Ещё": "More",
+  "Жалобы": "Complaints",
+  "Ждём подключения пациента": "Waiting for the patient to connect",
+  "Женский": "Female",
+  "Журнал аудита": "Audit log",
+  "Жёсткие точки совпадают, совмещение невозможно": "Rigid points coincide, alignment is impossible",
+  "Завершить": "End",
+  "Завершить немедленно": "End now",
+  "Завершить приём": "End appointment",
+  "Завершить приём?": "End the appointment?",
+  "Завершён": "Finished",
+  "Загрузка...": "Loading...",
+  "Задание ": "Task ",
+  "Задание (максимум коэффициента 0-1)": "Task (maximum coefficient 0-1)",
+  "Задание не найдено": "Job not found",
+  "Задания": "Tasks",
+  "Задания для лица": "Face tasks",
+  "Заключение": "Report",
+  "Заключение консультации": "Consultation report",
+  "Заключение отправлено пациенту": "Report sent to the patient",
+  "Заключение сохранено": "Report saved",
+  "Закрытие глаз": "Eye closure",
+  "Закрыть": "Close",
+  "Замен: ": "Replacements: ",
+  "Заменить везде": "Replace everywhere",
+  "Замер ": "Measurement ",
+  "Заметки и карточка пациенту не передаются.": "Notes and the record are not shared with the patient.",
+  "Заново": "Again",
+  "Запись вашей речи прекратится. Уже расшифрованный текст останется у врача.": "Recording of your speech will stop. Text already transcribed stays with the doctor.",
+  "Запись речи недоступна в этом браузере": "Speech recording is not available in this browser",
+  "Запланирован": "Scheduled",
+  "Заполните заключение и отправьте его пациенту.": "Fill in the consultation report and send it to the patient.",
+  "Заполните заключение консультации и отправьте его пациенту.": "Fill in the consultation report and send it to the patient.",
+  "Заполнить заключение": "Fill in the report",
+  "Запрос на повторный снимок отправлен": "Retake request sent",
+  "Запрос отправлен пациенту": "Request sent to the patient",
+  "Запрос слишком большой": "Request too large",
+  "Запросить согласие на расшифровку": "Request consent to transcription",
+  "Запросить съёмку у пациента": "Request photos from the patient",
+  "Значения в долях МЗР: для миллиметров нужна калибровка перед серией.": "Values are IPD fractions: millimetres need a calibration before the series.",
+  "Значения в мм без калибровки не сохраняются": "Values in mm without calibration are not saved",
+  "Идёт": "In progress",
+  "Идёт обезличивание расшифровки. На процессоре это может занять несколько минут.": "De-identifying the transcript. On a CPU this may take several minutes.",
+  "Измерение симметрии": "Symmetry measurement",
+  "Измерения станут доступны, когда пациент даст согласие на анализ лица.": "Measurements will be available once the patient consents to face analysis.",
+  "Измерить симметрию": "Measure symmetry",
+  "Изображение размыто, держите голову неподвижно": "The image is blurry, keep your head still",
+  "Имя": "Name",
+  "Инфекционный гастроэнтерит и колит": "Infectious gastroenteritis and colitis",
+  "Инфекция мочевыводящих путей": "Urinary tract infection",
+  "Исходная расшифровка": "Original transcript",
+  "Исходная расшифровка содержит личные данные пациента. Просмотр записывается в журнал аудита.": "The original transcript contains the patient's personal data. Viewing is recorded in the audit log.",
+  "К списку приёмов": "Back to appointments",
+  "Кадр должен быть объектом": "Frame must be an object",
+  "Калибровка ": "Calibration ",
+  "Калибровка в мм": "Calibration in mm",
+  "Калибровка по радужке приблизительная: миллиметры ориентировочные. Для точности используйте калибровку по карте.": "Iris calibration is approximate: millimetres are indicative. For accuracy use card calibration.",
+  "Калибровка размеров": "Size calibration",
+  "Калибровка: ": "Calibration: ",
+  "Калибровки нет: значения в миллиметрах не показываются.": "No calibration: values in millimetres are not shown.",
+  "Калибровки нет: значения даны в долях межзрачкового расстояния, не в миллиметрах.": "No calibration: values are fractions of the interpupillary distance, not millimetres.",
+  "Камера": "Camera",
+  "Камера (V)": "Camera (V)",
+  "Камера и микрофон работают только на защищённом соединении (https://) или на localhost. Откройте страницу по https-адресу центра.": "Camera and microphone work only over a secure connection (https://) or on localhost. Open the page at the center's https address.",
+  "Камера или микрофон не найдены. Подключите устройство или выберите другое.": "Camera or microphone not found. Connect a device or choose another one.",
+  "Камера не готова": "Camera not ready",
+  "Камера недоступна": "Camera unavailable",
+  "Камера недоступна, включён режим только аудио": "Camera unavailable, audio-only mode is on",
+  "Камера недоступна: аудио только": "Camera unavailable: audio only",
+  "Камера недоступна: консультация будет только по аудио.": "Camera unavailable: the consultation will be audio only.",
+  "Камни жёлчного пузыря без холецистита": "Calculus of gallbladder without cholecystitis",
+  "Карта на кадре слишком мала": "The card is too small in the frame",
+  "Карточка": "Record",
+  "Карту нужно держать в одной плоскости с лицом, ровно, лицом к камере. Нажмите «Сделать кадр», затем отметьте четыре угла карты.": "Hold the card in the same plane as your face, flat, facing the camera. Press “Take frame”, then mark the four corners of the card.",
+  "Код": "Code",
+  "Код ": "Code ",
+  "Код МКБ-10": "ICD-10 code",
+  "Код МКБ-10 должен иметь вид A00 или A00.0": "ICD-10 code must look like A00 or A00.0",
+  "Код из приглашения": "Code from the invitation",
+  "Код консультации": "Consultation code",
+  "Код корректного формата": "Valid code format",
+  "Код скопирован": "Code copied",
+  "Комната": "Room",
+  "Комната закрыта у обоих участников. Данные на экране очищены.": "The room is closed for both participants. On-screen data has been cleared.",
+  "Комната не найдена": "Room not found",
+  "Комната не найдена или доступ к ней потерян (возможно, сервер перезапущен).": "Room not found or access to it was lost (the server may have restarted).",
+  "Комната не найдена.": "Room not found.",
+  "Комната не найдена. Проверьте код.": "Room not found. Check the code.",
+  "Консультация": "Consultation",
+  "Консультация будет немедленно прервана у обоих участников, комната закроется. Продолжить?": "The consultation will be ended immediately for both participants and the room will close. Continue?",
+  "Консультация завершена": "Consultation ended",
+  "Консультация прервана": "Consultation interrupted",
+  "Консультирование неуточнённое": "Counselling, unspecified",
+  "Контуры": "Contours",
+  "Кончик носа": "Nose tip",
+  "Крепко зажмурьте глаза": "Squeeze your eyes shut",
+  "Крупно и контрастно": "Large and high contrast",
+  "Кусков записи: ": "Recording chunks: ",
+  "Левая": "Left",
+  "Левая бровь": "Left eyebrow",
+  "Левая сторона": "Left side",
+  "Левый внешний угол глаза": "Left outer eye corner",
+  "Левый профиль 90": "Left profile 90",
+  "Левый угол рта": "Left mouth corner",
+  "Лихорадка неуточнённая": "Fever, unspecified",
+  "Лицо": "Face",
+  "Лицо не найдено": "Face not found",
+  "Лицо не найдено в кадре: скрыть его перед сохранением невозможно. Снимок не сделан.": "Face not found in the frame: it cannot be hidden before saving. Photo not taken.",
+  "Лицо не найдено на ": "Face not found on ",
+  "Лицо не найдено. Если снимок сохранён со скрытым лицом, анализировать его нельзя": "Face not found. If the photo was saved with the face hidden, it cannot be analysed",
+  "Лицо скрыто пикселизацией: такой снимок нельзя использовать для сравнения.": "The face is pixelated: this photo cannot be used for comparison.",
+  "Логин": "Login",
+  "Логин занят": "Login is taken",
+  "Локальная нейросеть недоступна": "The local model is unavailable",
+  "МЗР": "IPD",
+  "МЗР: межзрачковое расстояние. Положительное значение смещения: в сторону левой половины лица пациента. Кадров в выборке: ": "IPD: interpupillary distance. A positive offset points towards the left half of the patient's face. Frames in the sample: ",
+  "Маршрут не найден": "Route not found",
+  "Медицинский центр": "Medical center",
+  "Межзрачковое расстояние: ": "Interpupillary distance: ",
+  "Менопауза": "Menopause",
+  "Меню": "Menu",
+  "Место": "Place",
+  "Местонахождение пациента": "Patient location",
+  "Метрик симметрии в этом приёме пока нет.": "No symmetry metrics in this appointment yet.",
+  "Метрика": "Metric",
+  "Метрики": "Metrics",
+  "Мигрень неуточнённая": "Migraine, unspecified",
+  "Микрофон": "Microphone",
+  "Микрофон (M)": "Microphone (M)",
+  "Модель ещё не загружена": "The model is not loaded yet",
+  "Модуль Face Mesh недоступен": "Face Mesh unavailable",
+  "Модуль Face Mesh остановлен из-за ошибки обработки видео": "Face Mesh stopped because of a video processing error",
+  "Модуль Face Mesh отключён: на сервере нет файлов MediaPipe. Видеозвонок работает без него.": "Face Mesh is disabled: the server has no MediaPipe files. The video call works without it.",
+  "Модуль не запущен": "Module not started",
+  "Мужской": "Male",
+  "На ближайшие дни приёмов нет. Нажмите «Новый приём».": "No appointments in the coming days. Click “New appointment”.",
+  "На сервере закончилось место. Сообщите администратору": "The server is out of disk space. Tell the administrator",
+  "На снимке найдено более одного лица: использовано самое крупное.": "More than one face found in the photo: the largest one was used.",
+  "Наблюдение для врача, не оценка по клинической шкале": "Observation for the doctor, not a clinical scale score",
+  "Набор ракурсов": "View set",
+  "Набор ракурсов сохранён и отправлен пациенту": "View set saved and sent to the patient",
+  "Надувание щёк": "Cheek puff",
+  "Надуйте щёки и держите": "Puff out your cheeks and hold",
+  "Нажмите «Отправить», если всё в порядке.": "Press “Send” if everything is fine.",
+  "Нажмите снимок «до», затем снимок «после».": "Click the “before” photo, then the “after” photo.",
+  "Назад": "Back",
+  "Наклон линии глаз": "Eye line tilt",
+  "Наклон линии глаз (градусы)": "Eye line tilt (degrees)",
+  "Наложение": "Overlay",
+  "Например J06.9": "For example J06.9",
+  "Нарушение пигментации неуточнённое": "Disorder of pigmentation, unspecified",
+  "Нарушения засыпания и поддержания сна": "Disorders of initiating and maintaining sleep",
+  "Начать": "Start",
+  "Начать заново": "Start over",
+  "Начать приём": "Start appointment",
+  "Начать серию": "Start series",
+  "Не двигайтесь": "Hold still",
+  "Не наклоняйте голову к плечу": "Do not tilt your head towards the shoulder",
+  "Не проверено: в отчёт не попадает": "Not reviewed: not included in the report",
+  "Не согласен(на)": "I do not agree",
+  "Не удалось выполнить действие": "Could not complete the action",
+  "Не удалось выполнить сравнение: ": "Could not compare: ",
+  "Не удалось запустить Face Mesh: ": "Could not start Face Mesh: ",
+  "Не удалось начать демонстрацию экрана": "Could not start screen sharing",
+  "Не удалось начать запись речи": "Could not start speech recording",
+  "Не удалось обезличить: ": "Could not de-identify: ",
+  "Не удалось получить доступ к устройствам: ": "Could not access the devices: ",
+  "Не удалось получить устойчивую позу в допуске за отведённое время": "Could not get a stable pose within tolerance in the allotted time",
+  "Не удалось получить устойчивый кадр в анфасе. Повторите.": "Could not get a stable frontal frame. Try again.",
+  "Не удалось прочитать аудио": "Could not read the audio",
+  "Не удалось прочитать файл": "Could not read the file",
+  "Не удалось скопировать": "Could not copy",
+  "Не удалось создать код": "Could not create a code",
+  "Не удалось уменьшить снимок до допустимого размера": "Could not reduce the photo to the allowed size",
+  "Не удалось установить соединение, пробую ещё раз": "Could not connect, trying again",
+  "Не указано": "Not specified",
+  "Не указано действие": "No action specified",
+  "Неверная подпись запроса": "Invalid request signature",
+  "Неверный логин или пароль": "Wrong login or password",
+  "Недопустимый тип файла. Разрешены: PDF, JPEG, PNG, CSV, XLSX, XLS": "File type not allowed. Allowed: PDF, JPEG, PNG, CSV, XLSX, XLS",
+  "Недостаточно кадров с видимой радужкой": "Not enough frames with a visible iris",
+  "Недостаточно кадров с лицом в допустимой позе. Повторите задание.": "Not enough frames with the face in an acceptable pose. Repeat the task.",
+  "Недоступны: ": "Unavailable: ",
+  "Неизвестная правка": "Unknown edit",
+  "Неизвестный вид анализа": "Unknown analysis type",
+  "Неизвестный вид измерения": "Unknown measurement type",
+  "Неизвестный ракурс": "Unknown view",
+  "Неизвестный тип события": "Unknown event type",
+  "Некорректная дата и время": "Invalid date and time",
+  "Некорректная длина запроса": "Invalid request length",
+  "Некорректное заключение": "Invalid report",
+  "Некорректное содержимое файла": "Invalid file content",
+  "Некорректные данные": "Invalid data",
+  "Некорректные данные сигналинга": "Invalid signalling data",
+  "Некорректные данные файла": "Invalid file data",
+  "Некорректные параметры": "Invalid parameters",
+  "Некорректный JSON": "Invalid JSON",
+  "Некорректный email": "Invalid email",
+  "Некорректный номер или длительность куска": "Invalid chunk number or duration",
+  "Некорректный ответ сервиса отчётов": "Invalid response from the report service",
+  "Некорректный период": "Invalid period",
+  "Некорректный размер кадра": "Invalid frame size",
+  "Неподдерживаемый формат аудио": "Unsupported audio format",
+  "Несколько замеров симметрии подряд у одного человека. Показывает разброс самого измерения и минимальное изменение, которое можно отличить от этого разброса. Между замерами пациент отворачивается и снова садится прямо.": "Several symmetry measurements in a row on one person. Shows the spread of the measurement itself and the smallest change that can be told apart from that spread. Between measurements the patient turns away and sits up straight again.",
+  "Нет данных для анализа": "No data to analyse",
+  "Нет данных карточки": "No record data",
+  "Нет данных снимка": "No photo data",
+  "Нет доступа к комнате": "No access to the room",
+  "Нет заданий": "No jobs",
+  "Нет кадров": "No frames",
+  "Нет связи": "Offline",
+  "Нет связи при отправке файла": "No connection while sending the file",
+  "Нет связи с сервером": "No connection to the server",
+  "Нет связи с сервером. Пробую восстановить подключение.": "No connection to the server. Trying to reconnect.",
+  "Нет согласия пациента на расшифровку речи": "The patient has not consented to speech transcription",
+  "Новая серия": "New series",
+  "Новое сообщение": "New message",
+  "Новый приём": "New appointment",
+  "Нормировка на межзрачковое расстояние, без калибровки": "Normalised to the interpupillary distance, no calibration",
+  "Нужен audio_b64": "audio_b64 is required",
+  "Нужен frame или image_b64": "frame or image_b64 is required",
+  "Нужен анфас в допуске: ": "Frontal view within tolerance needed: ",
+  "Нужен ключ задания (8-64 символа)": "A job key is required (8-64 characters)",
+  "Нужен ключ куска (8-64 символа)": "A chunk key is required (8-64 characters)",
+  "Нужен список segments": "A segments list is required",
+  "Нужно имя запроса": "A query name is required",
+  "Нужно минимум два снимка одного ракурса одного пациента.": "At least two photos of the same view of one patient are needed.",
+  "Нужны 4 угла карты": "4 card corners are required",
+  "Нужны 4 угла карты и МЗР": "4 card corners and the IPD are required",
+  "Нужны логин, имя и пароль не короче 8 символов": "Login, name and a password of at least 8 characters are required",
+  "Нулевой масштаб нормировки": "Zero normalisation scale",
+  "Обе стороны вместе (модель не разделяет): ": "Both sides together (the model does not separate them): ",
+  "Обезличенная расшифровка речи, проверена врачом. Метки в квадратных скобках скрывают личные данные.": "De-identified speech transcript, reviewed by the doctor. Labels in square brackets hide personal data.",
+  "Обезличенной расшифровки ещё нет": "No de-identified transcript yet",
+  "Обезличенной расшифровки пока нет. Она появится после завершения приёма, если пациент дал согласие на расшифровку речи.": "No de-identified transcript yet. It will appear after the appointment ends if the patient consented to speech transcription.",
+  "Обезличить": "De-identify",
+  "Обезличить повторно": "De-identify again",
+  "Обезличить повторно?": "De-identify again?",
+  "Обезличить сейчас": "De-identify now",
+  "Обработка снимков на вашем устройстве...": "Processing photos on your device...",
+  "Обычный вид": "Standard view",
+  "Ожидаем пациента": "Waiting for the patient",
+  "Ожидаем подключения врача": "Waiting for the doctor to connect",
+  "Ожидается объект": "An object is expected",
+  "Ожидался JPEG": "JPEG expected",
+  "Ожидался объект JSON": "A JSON object was expected",
+  "Ожирение неуточнённое": "Obesity, unspecified",
+  "Опустите подбородок": "Lower your chin",
+  "Организация": "Organisation",
+  "Освободить место пациента": "Free the patient's place",
+  "Оставайтесь на этой странице": "Please stay on this page",
+  "Остановить": "Stop",
+  "Остановить расшифровку": "Stop transcription",
+  "Остановить расшифровку (отозвать согласие)": "Stop transcription (withdraw consent)",
+  "Остановить расшифровку речи": "Stop speech transcription",
+  "Остановить расшифровку?": "Stop transcription?",
+  "Остановить серию": "Stop series",
+  "Острая инфекция верхних дыхательных путей": "Acute upper respiratory infection",
+  "Острый бронхит неуточнённый": "Acute bronchitis, unspecified",
+  "Острый назофарингит": "Acute nasopharyngitis",
+  "Острый тонзиллит неуточнённый": "Acute tonsillitis, unspecified",
+  "Острый фарингит неуточнённый": "Acute pharyngitis, unspecified",
+  "Открываю комнату": "Opening the room",
+  "Открытие рта": "Mouth opening",
+  "Открыть": "Open",
+  "Открыть заключение": "Open report",
+  "Открыть и распечатать": "Open and print",
+  "Отмена": "Cancel",
+  "Отменено": "Cancelled",
+  "Отменено: пациент отозвал согласие": "Cancelled: the patient withdrew consent",
+  "Отменить замену": "Undo replacement",
+  "Отменить замену ": "Undo replacement ",
+  "Отметьте угол карты: ": "Mark the card corner: ",
+  "Отодвиньтесь от камеры": "Move back from the camera",
+  "Отозвать согласие": "Withdraw consent",
+  "Отправить": "Send",
+  "Отправить врачу": "Send to the doctor",
+  "Отправить пациенту": "Send to the patient",
+  "Отчёт": "Report",
+  "Отчёт от ": "Report of ",
+  "Отчёт сохранён в протокол": "Report saved to the record",
+  "Ошибка": "Error",
+  "Ошибка ": "Error ",
+  "Ошибка анализа": "Analysis error",
+  "Ошибка установки соединения": "Connection error",
+  "Пароль": "Password",
+  "Пациент": "Patient",
+  "Пациент дал согласие": "The patient consented",
+  "Пациент даёт согласие на анализ лица": "The patient consents to face analysis",
+  "Пациент ещё не вошёл в комнату": "The patient has not joined the room yet",
+  "Пациент не дал согласие": "The patient has not consented",
+  "Пациент не дал согласие на анализ лица": "The patient has not consented to face analysis",
+  "Пациент не найден": "Patient not found",
+  "Пациент ожидает": "Patient waiting",
+  "Пациент ожидает в комнате": "The patient is waiting in the room",
+  "Пациент отказался от расшифровки речи": "The patient declined speech transcription",
+  "Пациент подключился заново": "The patient reconnected",
+  "Пациент сможет войти заново по ссылке": "The patient will be able to join again via the link",
+  "Пациент согласился на расшифровку речи": "The patient agreed to speech transcription",
+  "Пациенту отправлен запрос на согласие": "Consent request sent to the patient",
+  "Передайте пациенту ссылку или код. Регистрация пациенту не нужна.": "Give the patient the link or the code. The patient does not need to register.",
+  "Переподключение": "Reconnecting",
+  "Переснять": "Retake",
+  "Печать": "Print",
+  "Печать или PDF": "Print or PDF",
+  "Письмо с приглашением отправлено на email пациента.": "The invitation email has been sent to the patient.",
+  "Плотно сожмите губы": "Press your lips tightly together",
+  "Пневмония неуточнённая": "Pneumonia, unspecified",
+  "По банковской карте (85,6 мм)": "By bank card (85.6 mm)",
+  "По вертикали": "Vertical",
+  "По горизонтали": "Horizontal",
+  "По радужке (приблизительно)": "By iris (approximate)",
+  "Поверните голову ещё левее (к левому плечу)": "Turn your head further left (towards the left shoulder)",
+  "Поверните голову ещё правее (к правому плечу)": "Turn your head further right (towards the right shoulder)",
+  "Поверните голову к левому плечу на 45 градусов": "Turn your head to the left shoulder by 45 degrees",
+  "Поверните голову к правому плечу на 45 градусов": "Turn your head to the right shoulder by 45 degrees",
+  "Повернитесь к камере": "Face the camera",
+  "Поворот влево 45": "Turn left 45",
+  "Поворот вправо 45": "Turn right 45",
+  "Повторить": "Retry",
+  "Повторить задание": "Repeat the task",
+  "Повторный контакт": "Follow-up contact",
+  "Повторяемость: ": "Repeatability: ",
+  "Под этой меткой во всей расшифровке будет показан исходный текст. Делайте это, только если это не личные данные (например, название лекарства).": "The original text will be shown under this label throughout the transcript. Do this only if it is not personal data (for example, a drug name).",
+  "Подбородок": "Chin",
+  "Подвижность": "Mobility",
+  "Подвижность лица": "Facial mobility",
+  "Подвижность: соотношение сторон": "Mobility: side ratio",
+  "Подвиньтесь ближе": "Move closer",
+  "Поджатие губ": "Lip press",
+  "Подключение": "Connecting",
+  "Поднимите брови как можно выше": "Raise your eyebrows as high as you can",
+  "Подпись врача ______________________ / ": "Doctor's signature ______________________ / ",
+  "Подсказки позы": "Pose hints",
+  "Подтвердить": "Confirm",
+  "Подтвердить для отчёта": "Confirm for the report",
+  "Подъём бровей": "Eyebrow raise",
+  "Поза в момент снимка вне допуска. Лучше переснять.": "The pose was out of tolerance when the photo was taken. Better retake it.",
+  "Поза вне допуска: значения не сохраняются": "Pose out of tolerance: values are not saved",
+  "Поза на одном или обоих снимках вне допуска ": "The pose on one or both photos is out of tolerance ",
+  "Поза пациента: нет данных": "Patient pose: no data",
+  "Поза по сжатому видео: ": "Pose from compressed video: ",
+  "Поза: ": "Pose: ",
+  "Позже": "Later",
+  "Поиск точек на сервере недоступен: нужны точки из браузера": "Landmark detection on the server is unavailable: landmarks from the browser are required",
+  "Показать": "Show",
+  "Показать оригинал": "Show original",
+  "Показать оригинал?": "Show the original?",
+  "Показать сетку на видео": "Show the mesh on video",
+  "Покинуть консультацию?": "Leave the consultation?",
+  "Пол": "Sex",
+  "Полный экран": "Full screen",
+  "Полный экран недоступен": "Full screen unavailable",
+  "Полный экран недоступен в этом браузере": "Full screen is not available in this browser",
+  "Положение шторки или прозрачность": "Slider position or opacity",
+  "Получен снимок: ": "Photo received: ",
+  "Получена калибровка размеров": "Size calibration received",
+  "Получено замеров: ": "Measurements received: ",
+  "Получены метрики симметрии": "Symmetry metrics received",
+  "Получены результаты подвижности": "Mobility results received",
+  "Порядок документирования": "Documentation steps",
+  "Последующее наблюдение после лечения": "Follow-up examination after treatment",
+  "Правая": "Right",
+  "Правая бровь": "Right eyebrow",
+  "Правая сторона": "Right side",
+  "Правый внешний угол глаза": "Right outer eye corner",
+  "Правый профиль 90": "Right profile 90",
+  "Правый угол рта": "Right mouth corner",
+  "Предпросмотр: ": "Preview: ",
+  "Приблизительно, погрешность выше": "Approximate, larger error",
+  "Приватные заметки": "Private notes",
+  "Прикрепить файл": "Attach file",
+  "Принимаемые препараты": "Current medications",
+  "Приподнимите подбородок": "Raise your chin",
+  "Приём завершён": "Appointment ended",
+  "Приём завершён: запись речи не принимается": "Appointment ended: speech recording is not accepted",
+  "Приём завершён: расшифровку включить нельзя": "Appointment ended: transcription cannot be turned on",
+  "Приём назначен другому врачу": "The appointment is assigned to another doctor",
+  "Приём не найден": "Appointment not found",
+  "Приём создан": "Appointment created",
+  "Приёмы": "Appointments",
+  "Проверено врачом, идёт в отчёт": "Reviewed by the doctor, goes into the report",
+  "Проверка оборудования": "Equipment check",
+  "Проверка повторяемости": "Repeatability check",
+  "Проверьте снимок": "Check the photo",
+  "Проверьте текст: нейросеть может пропустить имя или название. Синие метки скрывают личные данные; нажмите на метку, чтобы отменить замену.": "Check the text: the model may miss a name or a place. Blue labels hide personal data; click a label to undo the replacement.",
+  "Продолжить": "Continue",
+  "Продолжить без видео": "Continue without video",
+  "Пройти заново": "Start over",
+  "Пропустить": "Skip",
+  "Пропустить ракурс": "Skip view",
+  "Просьба врача": "Doctor's request",
+  "Профиль: поверните голову к левому плечу на 90 градусов": "Profile: turn your head to the left shoulder by 90 degrees",
+  "Профиль: поверните голову к правому плечу на 90 градусов": "Profile: turn your head to the right shoulder by 90 degrees",
+  "Прочитать и дать согласие": "Read and consent",
+  "Пустое сообщение": "Empty message",
+  "Пустое тело запроса": "Empty request body",
+  "Пустой кусок записи": "Empty recording chunk",
+  "Пустой файл": "Empty file",
+  "Раздел «Отчёт»: печать или PDF с числами, снимками и динамикой": "“Report” section: print or PDF with numbers, photos and changes",
+  "Разделы": "Sections",
+  "Разность": "Difference",
+  "Разность (правая − левая)": "Difference (right − left)",
+  "Разность (правая − левая): ": "Difference (right − left): ",
+  "Разность: среднее ± SD": "Difference: mean ± SD",
+  "Ракурс": "View",
+  "Ракурс ": "View ",
+  "Расположитесь по центру кадра": "Center yourself in the frame",
+  "Расчёт...": "Calculating...",
+  "Расшифровка": "Transcript",
+  "Расшифровка будет обезличена заново. Ваши ручные правки и подтверждение будут сброшены.": "The transcript will be de-identified again. Your manual edits and confirmation will be reset.",
+  "Расшифровка не включена: обезличенный текст ещё не проверен врачом.": "Transcript not included: the de-identified text has not been reviewed by the doctor yet.",
+  "Расшифровка неполная: ": "Transcript incomplete: ",
+  "Расшифровка: в очереди ": "Transcription: queued ",
+  "Расшифровки этого приёма нет": "There is no transcript for this appointment",
+  "Режим сетки (F)": "Mesh mode (F)",
+  "Режим сравнения": "Comparison mode",
+  "Результат отправлен врачу": "Result sent to the doctor",
+  "Рекомендации": "Recommendations",
+  "Ресурс не найден": "Resource not found",
+  "Рубцовые состояния и фиброз кожи": "Scar conditions and fibrosis of skin",
+  "Самовидение, можно перетаскивать": "Self view, draggable",
+  "Сахарный диабет 2 типа без осложнений": "Type 2 diabetes mellitus without complications",
+  "Свободный": "Free",
+  "Связь плохая. Включите режим «Только аудио» через кнопку «Ещё».": "Poor connection. Turn on “Audio only” mode from the “More” button.",
+  "Связь: плохая": "Connection: poor",
+  "Связь: средняя": "Connection: fair",
+  "Связь: хорошая": "Connection: good",
+  "Сделать кадр": "Take frame",
+  "Сеанс недоступен": "Session unavailable",
+  "Сегодня, ": "Today, ",
+  "Сервер недоступен": "Server unavailable",
+  "Сервис анализа временно недоступен: расчёт выполнен на этом устройстве": "The analysis service is temporarily unavailable: calculated on this device",
+  "Сервис анализа не подключён": "The analysis service is not connected",
+  "Сервис временно недоступен": "The service is temporarily unavailable",
+  "Сервис обезличивания временно недоступен. Расшифровка сохранена и будет обезличена, когда сервис заработает.": "The de-identification service is temporarily unavailable. The transcript is saved and will be de-identified when the service is back.",
+  "Сервис обезличивания не подключён": "The de-identification service is not connected",
+  "Сервис отчётов временно недоступен": "The report service is temporarily unavailable",
+  "Сервис отчётов не подключён": "The report service is not connected",
+  "Сервисы: ": "Services: ",
+  "Сердечная недостаточность неуточнённая": "Heart failure, unspecified",
+  "Серия завершена: ": "Series finished: ",
+  "Сессия истекла": "Session expired",
+  "Сетка": "Mesh",
+  "Сетка и поза по входящему видео построены по сжатому потоку и ориентировочны. Точные измерения выполняются на устройстве пациента.": "The mesh and pose from incoming video are built from a compressed stream and are approximate. Exact measurements are made on the patient's device.",
+  "Сетка лица (F)": "Face mesh (F)",
+  "Сетка на видео": "Mesh on video",
+  "Сетка на видео и кадрирование": "Mesh on video and framing",
+  "Симметрия": "Symmetry",
+  "Синдром раздражённого кишечника": "Irritable bowel syndrome",
+  "Скачать": "Download",
+  "Скачать ": "Download ",
+  "Скачать изображение": "Download image",
+  "Скопировано": "Copied",
+  "Скопировать код": "Copy code",
+  "Скопировать код сессии": "Copy session code",
+  "Скопировать ссылку": "Copy link",
+  "Скопировать ссылку-приглашение": "Copy invitation link",
+  "Слишком большой запрос": "Request too large",
+  "Слишком большой кусок": "Chunk too large",
+  "Слишком много запросов": "Too many requests",
+  "Слишком много запросов, попробуйте позже": "Too many requests, try again later",
+  "Слишком много измерений": "Too many measurements",
+  "Слишком много кадров": "Too many frames",
+  "Слишком много кусков записи": "Too many recording chunks",
+  "Слишком много попыток. Подождите несколько минут.": "Too many attempts. Wait a few minutes.",
+  "Слишком много снимков": "Too many photos",
+  "Слишком много событий": "Too many events",
+  "Слишком яркий свет на лице": "The light on your face is too bright",
+  "Смешанное тревожное и депрессивное расстройство": "Mixed anxiety and depressive disorder",
+  "Смещение кончика носа от средней линии": "Nose tip offset from the midline",
+  "Смещение подбородка от средней линии": "Chin offset from the midline",
+  "Смотрите в камеру": "Look at the camera",
+  "Смотрите прямо в камеру": "Look straight at the camera",
+  "Сначала сохраните заключение": "Save the report first",
+  "Снимки": "Photos",
+  "Снимки приёма": "Appointment photos",
+  "Снимки этого приёма": "Photos of this appointment",
+  "Снимков пока нет.": "No photos yet.",
+  "Снимок": "Photo",
+  "Снимок не в base64": "Photo is not base64",
+  "Снимок не найден": "Photo not found",
+  "Снимок отправлен врачу": "Photo sent to the doctor",
+  "Снять подтверждение": "Remove confirmation",
+  "Снять сейчас": "Take now",
+  "Собеседник отключился": "The other side disconnected",
+  "Событие слишком большое": "Event too large",
+  "Согласен(на)": "I agree",
+  "Согласие": "Consent",
+  "Согласие можно отозвать в любой момент в разделе «Задания».": "You can withdraw consent at any time in “Tasks”.",
+  "Согласие можно отозвать в любой момент: нажмите на индикатор «Идёт расшифровка речи» вверху экрана.": "You can withdraw consent at any time: click the “Speech transcription is on” indicator at the top of the screen.",
+  "Согласие на анализ лица": "Consent to face analysis",
+  "Согласие на расшифровку речи": "Consent to speech transcription",
+  "Содержимое не соответствует типу файла": "Content does not match the file type",
+  "Содержит личные данные. Не копируйте этот текст в отчёт.": "Contains personal data. Do not copy this text into the report.",
+  "Создать": "Create",
+  "Сообщение": "Message",
+  "Сообщения": "Messages",
+  "Соотношение": "Ratio",
+  "Соотношение сторон": "Side ratio",
+  "Соотношение сторон: ": "Side ratio: ",
+  "Сохранить": "Save",
+  "Сохранить в протокол": "Save to the record",
+  "Сохранить набор": "Save set",
+  "Спасибо. Документы от врача появятся в чате и в разделе «Файлы».": "Thank you. Documents from the doctor will appear in the chat and in “Files”.",
+  "Сравнение": "Compare",
+  "Сравнение до и после": "Before and after comparison",
+  "Сравнение до и после: ": "Before and after comparison: ",
+  "Сравнение снимков до и после": "Before and after photo comparison",
+  "Сравнение сохранено в протокол": "Comparison saved to the record",
+  "Сравнение: ": "Comparison: ",
+  "Сравнения": "Comparisons",
+  "Сравнить": "Compare",
+  "Срок хранения исходника истёк: правки недоступны": "The original has expired: edits are unavailable",
+  "Ссылка скопирована": "Link copied",
+  "Ссылка-приглашение": "Invitation link",
+  "Стенокардия неуточнённая": "Angina pectoris, unspecified",
+  "Страница открыта без защищённого соединения: камера и микрофон будут недоступны. Откройте ссылку по https://.": "The page is open without a secure connection: camera and microphone will be unavailable. Open the link via https://.",
+  "Сформировать отчёт": "Create report",
+  "Съёмка": "Photos",
+  "Съёмка завершена": "Photos finished",
+  "Таблица (CSV)": "Table (CSV)",
+  "Такой замены нет": "No such replacement",
+  "Текст сообщения": "Message text",
+  "Телефон (обязательно)": "Phone (required)",
+  "Тело запроса не JSON": "Request body is not JSON",
+  "Тело запроса получено не полностью": "Request body was not fully received",
+  "Только администратор": "Administrator only",
+  "Только врач": "Doctor only",
+  "Только пациент": "Patient only",
+  "Точка": "Point",
+  "Точка (после относительно до, ": "Point (after relative to before, ",
+  "Требуется вход врача": "Doctor sign-in required",
+  "Уберите свет за спиной": "Remove the light behind you",
+  "Углы отмечены неверно": "Corners marked incorrectly",
+  "Уголки рта до средней линии: разность": "Mouth corners to midline: difference",
+  "Уголки рта: разность высот": "Mouth corners: height difference",
+  "Уголки рта: расстояние до средней линии": "Mouth corners: distance to the midline",
+  "Угри обыкновенные": "Acne vulgaris",
+  "Укажите ФИО пациента": "Enter the patient's full name",
+  "Укажите ФИО пациента или выберите существующего": "Enter the patient's full name or choose an existing patient",
+  "Укажите адрес и телефон пациента": "Enter the patient's address and phone",
+  "Укажите адрес и телефон пациента и начните приём": "Enter the patient's address and phone and start the appointment",
+  "Укажите адрес и телефон пациента перед началом приёма": "Enter the patient's address and phone before starting the appointment",
+  "Улыбка": "Smile",
+  "Управление звонком": "Call controls",
+  "Уровень микрофона": "Microphone level",
+  "Уровень микрофона: скажите что-нибудь": "Microphone level: say something",
+  "Устанавливаю соединение с пациентом": "Connecting to the patient",
+  "Устройство занято другим приложением. Закройте его и нажмите «Повторить».": "The device is busy in another app. Close that app and click “Retry”.",
+  "Участник": "Participant",
+  "Учебное заведение": "Educational institution",
+  "ФИО": "Full name",
+  "ФИО (начните вводить, чтобы выбрать существующего пациента)": "Full name (start typing to pick an existing patient)",
+  "Файл больше 20 МБ": "File is larger than 20 MB",
+  "Файл не найден": "File not found",
+  "Файл не принят": "File not accepted",
+  "Файл пустой": "File is empty",
+  "Файл снимка отсутствует": "Photo file is missing",
+  "Файлы": "Files",
+  "Файлы MediaPipe не найдены на сервере": "MediaPipe files not found on the server",
+  "Фамилия Имя Отчество": "Full name",
+  "Формат кода: A00 или A00.0": "Code format: A00 or A00.0",
+  "Фотосъёмка по ракурсам": "Photos by view",
+  "Фрагмент": "Fragment",
+  "Фрагмент будет скрыт меткой во всей расшифровке. Можно выделить его в тексте до нажатия кнопки.": "The fragment will be hidden by a label throughout the transcript. You can select it in the text before pressing the button.",
+  "Фрагмент не найден в обезличенном тексте": "Fragment not found in the de-identified text",
+  "Ход консультации": "Consultation notes",
+  "Хронические заболевания": "Chronic conditions",
+  "Чат": "Chat",
+  "Чат и файлы": "Chat and files",
+  "Числа для документирования, не диагноз": "Figures for documentation, not a diagnosis",
+  "Число замеров": "Number of measurements",
+  "Что анализируется: изображение с вашей камеры обрабатывается локально, на вашем устройстве.": "What is analysed: the image from your camera is processed locally, on your device.",
+  "Что вошло в отчёт": "What the report includes",
+  "Что не сохраняется: поток видео. Он не записывается и не отправляется для анализа на сервер.": "What is not stored: the video stream. It is not recorded and not sent to the server for analysis.",
+  "Что передаётся врачу: числовые результаты и снимки, которые вы подтверждаете сами.": "What is sent to the doctor: numeric results and the photos you confirm yourself.",
+  "Что это": "What it is",
+  "Чтобы вернуться, откройте ссылку-приглашение ещё раз.": "To come back, open the invitation link again.",
+  "Ширина половин лица": "Width of the face halves",
+  "Ширина половин лица: разность": "Face half width: difference",
+  "Широко откройте рот": "Open your mouth wide",
+  "Широко улыбнитесь и держите улыбку": "Smile widely and hold it",
+  "Шторка": "Slider",
+  "Экран": "Screen",
+  "Экспорт FHIR": "FHIR export",
+  "Экстренное завершение": "Emergency end",
+  "Экстренные службы: 103 / 112": "Emergency services: 103 / 112",
+  "Эссенциальная гипертензия": "Essential hypertension",
+  "Эта консультация уже завершена.": "This consultation has already ended.",
+  "Это заключение консультации, а не электронный рецепт.": "This is a consultation report, not an electronic prescription.",
+  "Я даю согласие на проведение консультации в дистанционной форме (видеосвязь) и на обработку моих персональных данных в объёме, необходимом для оказания медицинской помощи. Я понимаю, что дистанционная консультация не заменяет очный осмотр.": "I consent to a remote consultation (video call) and to the processing of my personal data to the extent needed to provide medical care. I understand that a remote consultation does not replace an in-person examination.",
+  "Я пациент: ввести код": "I am a patient: enter code",
+  "Я согласен(на) на дистанционную консультацию и обработку персональных данных": "I agree to a remote consultation and to the processing of my personal data",
+  "брови": "brows",
+  "глаза": "eyes",
+  "готово": "done",
+  "градусы": "degrees",
+  "губы": "lips",
+  "доли МЗР": "IPD fractions",
+  "доли высоты лица": "fractions of face height",
+  "есть": "yes",
+  "задания на подвижность лица": "facial mobility tasks",
+  "замер;метрика;правая;левая;разность;единицы": "measurement;metric;right;left;difference;units",
+  "измерение симметрии лица": "a facial symmetry measurement",
+  "итог": "summary",
+  "итог;метрика;разность: среднее;разность: SD;минимальное различимое изменение (MDC95);замеров": "summary;metric;difference: mean;difference: SD;minimal detectable change (MDC95);measurements",
+  "калибровку размеров": "size calibration",
+  "коэффициент 0–1": "coefficient 0–1",
+  "левый верхний": "top left",
+  "левый нижний": "bottom left",
+  "мм": "mm",
+  "наклон": "tilt",
+  "не удалось расшифровать кусков записи — ": "recording chunks that could not be transcribed — ",
+  "неизвестная ошибка": "unknown error",
+  "необязательно": "optional",
+  "нет": "no",
+  "нет (значения в миллиметрах не приводятся)": "none (values in millimetres are not given)",
+  "нет данных": "no data",
+  "обоих снимках": "both photos",
+  "отношение": "ratio",
+  "отчёт-лицо-": "face-report-",
+  "ошибка": "error",
+  "ошибка инициализации": "initialisation error",
+  "плохая": "poor",
+  "по банковской карте 85,6 мм": "by bank card 85.6 mm",
+  "по радужке (приблизительно, погрешность выше)": "by iris (approximate, larger error)",
+  "повторить снимок: ": "retake a photo: ",
+  "повторяемость-": "repeatability-",
+  "правая минус левая": "right minus left",
+  "правый верхний": "top right",
+  "правый нижний": "bottom right",
+  "приём": "appointment",
+  "сервис анализа": "analysis service",
+  "смотрите прямо в камеру": "look straight at the camera",
+  "снимке «до»": "the “before” photo",
+  "снимке «после»": "the “after” photo",
+  "со слов пациента": "as reported by the patient",
+  "сравнение.png": "comparison.png",
+  "средняя": "fair",
+  "стандартную фотосъёмку лица": "standard facial photography",
+  "удалено после отзыва согласия — ": "deleted after consent was withdrawn — ",
+  "улыбка": "smile",
+  "устройство пациента": "patient device",
+  "хорошая": "good",
+  "● Идёт расшифровка речи": "● Speech transcription is on",
+};
+function T(s) { return LANG === 'en' && typeof s === 'string' && Object.prototype.hasOwnProperty.call(EN, s) ? EN[s] : s; }
 'use strict';
 /* ===== Вспомогательные функции ===== */
 const $ = (s, r) => (r || document).querySelector(s);
@@ -2427,7 +3271,7 @@ const fmtDT = ts => fmtDate(ts) + ' ' + fmtTime(ts);
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 const median = arr => { if (!arr.length) return null; const s = arr.slice().sort((a, b) => a - b); const m = s.length >> 1; return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2; };
 const sleep = ms => new Promise(r => setTimeout(r, ms));
-const POSE_NAMES = { frontal: 'Анфас', left45: 'Поворот влево 45', right45: 'Поворот вправо 45', left90: 'Левый профиль 90', right90: 'Правый профиль 90', free: 'Свободный' };
+const POSE_NAMES = { frontal: T('Анфас'), left45: T('Поворот влево 45'), right45: T('Поворот вправо 45'), left90: T('Левый профиль 90'), right90: T('Правый профиль 90'), free: T('Свободный') };
 
 /* ===== Единое состояние с подпиской ===== */
 const State = {
@@ -2440,7 +3284,7 @@ const State = {
   },
   sub(f) { this.subs.push(f); }
 };
-const Cfg = { center: 'Медицинский центр', mediapipe: false, auth: true, secure: false };
+const Cfg = { center: T('Медицинский центр'), mediapipe: false, auth: true, secure: false };
 
 /* ===== Уведомления ===== */
 const Toast = {
@@ -2451,7 +3295,7 @@ const Toast = {
     requestAnimationFrame(() => t.classList.add('on'));
     setTimeout(() => { t.classList.remove('on'); setTimeout(() => t.remove(), 250); }, ms || 3500);
   },
-  err(e) { this.show(typeof e === 'string' ? e : (e && e.message) || 'Ошибка', 'err', 5000); }
+  err(e) { this.show(typeof e === 'string' ? e : (e && e.message) || T('Ошибка'), 'err', 5000); }
 };
 
 /* ===== Общий rAF-цикл ===== */
@@ -2479,10 +3323,10 @@ const Ui = {
     const root = $('#sheets');
     const scrim = h('div', { class: 'scrim' });
     const body = h('div', { class: 'stack' });
-    const sheet = h('div', { class: 'sheet' + (opt.wide ? ' wide' : ''), role: 'dialog', 'aria-modal': 'true', 'aria-label': opt.title || 'Диалог' });
+    const sheet = h('div', { class: 'sheet' + (opt.wide ? ' wide' : ''), role: 'dialog', 'aria-modal': 'true', 'aria-label': opt.title || T('Диалог') });
     const api = { el: body, close: () => { Ui.sheets = Ui.sheets.filter(s => s !== api); scrim.classList.remove('on'); sheet.classList.remove('on'); setTimeout(() => { scrim.remove(); sheet.remove(); if (!Ui.sheets.length) root.style.pointerEvents = 'none'; }, 220); if (opt.onClose) opt.onClose(); } };
     if (opt.title) sheet.append(h('div', { class: 'rowb', style: 'margin-bottom:12px' }, h('h2', { text: opt.title }),
-      opt.noClose ? null : h('button', { class: 'ibtn', 'aria-label': 'Закрыть', onclick: api.close }, icon('close'))));
+      opt.noClose ? null : h('button', { class: 'ibtn', 'aria-label': T('Закрыть'), onclick: api.close }, icon('close'))));
     sheet.append(body);
     if (opt.actions && opt.actions.length) {
       sheet.append(h('div', { class: 'row wrap', style: 'margin-top:16px;justify-content:flex-end' },
@@ -2502,7 +3346,7 @@ const Ui = {
       const fin = v => { if (!done) { done = true; res(v); } };
       const s = this.sheet({
         title, onClose: () => fin(false),
-        actions: [{ label: 'Отмена', kind: 'sec', onClick: () => fin(false) }, { label: okLabel || 'Подтвердить', kind: danger ? 'dng' : 'pri', onClick: () => fin(true) }]
+        actions: [{ label: T('Отмена'), kind: 'sec', onClick: () => fin(false) }, { label: okLabel || T('Подтвердить'), kind: danger ? 'dng' : 'pri', onClick: () => fin(true) }]
       });
       s.el.append(h('p', { text, style: 'margin:0' }));
     });
@@ -2514,15 +3358,15 @@ const Ui = {
   },
   input(type, ph, val) { const i = h('input', { class: 'inp', type: type || 'text', placeholder: ph || '' }); if (val != null) i.value = val; return i; },
   statusChip(s) {
-    const m = { planned: ['Запланирован', 'chip'], waiting: ['Пациент ожидает', 'chip o'], in_progress: ['Идёт', 'chip g'], completed: ['Завершён', 'chip'] };
+    const m = { planned: [T('Запланирован'), 'chip'], waiting: [T('Пациент ожидает'), 'chip o'], in_progress: [T('Идёт'), 'chip g'], completed: [T('Завершён'), 'chip'] };
     const x = m[s] || m.planned;
     return h('span', { class: x[1], text: x[0] });
   },
   async copy(text, msg) {
-    try { await navigator.clipboard.writeText(text); Toast.show(msg || 'Скопировано'); }
+    try { await navigator.clipboard.writeText(text); Toast.show(msg || T('Скопировано')); }
     catch (e) {
       const t = h('textarea', { style: 'position:fixed;opacity:0' }); t.value = text; document.body.append(t); t.select();
-      try { document.execCommand('copy'); Toast.show(msg || 'Скопировано'); } catch (e2) { Toast.err('Не удалось скопировать'); }
+      try { document.execCommand('copy'); Toast.show(msg || T('Скопировано')); } catch (e2) { Toast.err(T('Не удалось скопировать')); }
       t.remove();
     }
   },
@@ -2543,11 +3387,22 @@ const Ui = {
   /* заметная кнопка режима на первом экране пациента: до согласия и проверки камеры */
   bigToggle() {
     const b = h('button', { class: 'btn sec bigtoggle', 'aria-pressed': String(this.isBig()) }, icon('text'), h('span'));
-    const paint = () => { b.setAttribute('aria-pressed', String(this.isBig())); b.lastChild.textContent = this.isBig() ? 'Обычный вид' : 'Крупно и контрастно'; };
+    const paint = () => { b.setAttribute('aria-pressed', String(this.isBig())); b.lastChild.textContent = this.isBig() ? T('Обычный вид') : T('Крупно и контрастно'); };
     b.onclick = () => { this.big(); paint(); Header.update(); };
     paint();
     return b;
   },
+  /* язык интерфейса: сохраняется в браузере, страница перезагружается (строки собираются при загрузке) */
+  async setLang(l) {
+    if (!LANGS.includes(l) || l === LANG) return;
+    if (State.v.view === 'call' && !(await this.confirm(T('Сменить язык?'), T('Страница перезагрузится, звонок подключится заново.'), T('Сменить')))) return;
+    try { localStorage.setItem('mars_lang', l); } catch (e) { /* без хранилища: язык из адреса */ }
+    const u = new URL(location.href); u.searchParams.set('lang', l); location.replace(u.toString());
+  },
+  /* название другого языка на нём самом: его узнают, даже не читая текущий */
+  otherLang() { return LANG === 'ru' ? 'en' : 'ru'; },
+  langName(l) { return l === 'en' ? 'English' : 'Русский'; },
+  langToggle() { const o = this.otherLang(); return h('button', { class: 'btn sec', lang: o, onclick: () => this.setLang(o) }, icon('text'), this.langName(o)); },
   sound() {
     try {
       const AC = window.AudioContext || window.webkitAudioContext; if (!AC) return;
@@ -2573,10 +3428,10 @@ const Api = {
     if (tok && path.startsWith('/rooms')) hd['Authorization'] = 'Bearer ' + tok;
     let res;
     try { res = await fetch(path, { method, headers: hd, body, signal: opt.signal, credentials: 'same-origin', keepalive: !!opt.keepalive }); }
-    catch (e) { if (e && e.name === 'AbortError') throw e; throw new ApiErr(0, 'network', 'Нет связи с сервером'); }
+    catch (e) { if (e && e.name === 'AbortError') throw e; throw new ApiErr(0, 'network', T('Нет связи с сервером')); }
     if (opt.blob && res.ok) return res.blob();
     let data = null; try { data = await res.json(); } catch (e) { /* не JSON */ }
-    if (!res.ok) throw new ApiErr(res.status, (data && data.error) || 'error', (data && data.message) || ('Ошибка ' + res.status));
+    if (!res.ok) throw new ApiErr(res.status, (data && data.error) || 'error', T((data && data.message) || '') || (T('Ошибка ') + res.status));
     return data;
   },
   get(p, o) { return this.req('GET', p, o); },
@@ -2591,7 +3446,7 @@ const Auth = {
   doctor: null,
   async init() {
     const me = await Api.get('/auth/me', { token: false });
-    Cfg.center = me.center; Cfg.auth = me.auth_required; this.doctor = me.doctor;
+    Cfg.center = T(me.center); Cfg.auth = me.auth_required; this.doctor = me.doctor;
     return me.doctor;
   },
   showLogin(msg) {
@@ -2605,14 +3460,14 @@ const Auth = {
       try {
         const r = await Api.post('/auth/login', { login: user.value.trim(), password: pw.value }, { token: false });
         this.doctor = r.doctor; App.afterLogin();
-      } catch (ex) { err.textContent = ex.status === 429 ? 'Слишком много попыток. Подождите несколько минут.' : ex.message; }
+      } catch (ex) { err.textContent = ex.status === 429 ? T('Слишком много попыток. Подождите несколько минут.') : ex.message; }
     };
     $('#main').replaceChildren(h('div', { class: 'center-col' },
-      h('h1', { text: 'Вход для врача' }), h('p', { class: 'mut', text: Cfg.center }),
+      h('h1', { text: T('Вход для врача') }), h('p', { class: 'mut', text: Cfg.center }),
       h('form', { class: 'stack', style: 'width:min(360px,100%)', onsubmit: go },
-        Ui.field('Логин', user), Ui.field('Пароль', pw), err,
-        h('button', { class: 'btn pri lg', type: 'submit', text: 'Войти' })),
-      h('button', { class: 'btn txt', onclick: () => Session.askCode(), text: 'Я пациент: ввести код' })));
+        Ui.field(T('Логин'), user), Ui.field(T('Пароль'), pw), err,
+        h('button', { class: 'btn pri lg', type: 'submit', text: T('Войти') })),
+      h('button', { class: 'btn txt', onclick: () => Session.askCode(), text: T('Я пациент: ввести код') })));
     user.focus();
   },
   async logout() {
@@ -2629,39 +3484,39 @@ const Appointments = {
     State.set({ view: 'appointments' }); Header.update();
     clearInterval(this.timer);
     const list = h('div', { class: 'stack' }, h('div', { class: 'sk', style: 'height:64px' }), h('div', { class: 'sk', style: 'height:64px' }));
-    $('#main').replaceChildren(h('div', { class: 'page wide' }, h('div', { class: 'rowb', style: 'margin-bottom:16px' }, h('h1', { text: 'Приёмы' }),
-      h('button', { class: 'btn pri', onclick: () => this.newSheet() }, icon('plus'), 'Новый приём')), list));
+    $('#main').replaceChildren(h('div', { class: 'page wide' }, h('div', { class: 'rowb', style: 'margin-bottom:16px' }, h('h1', { text: T('Приёмы') }),
+      h('button', { class: 'btn pri', onclick: () => this.newSheet() }, icon('plus'), T('Новый приём'))), list));
     const load = async () => {
       if (State.v.view !== 'appointments') { clearInterval(this.timer); return; }
       try {
         const from = this.dayStart(), to = from + 14 * 86400;
         const r = await Api.get('/appointments?from=' + from + '&to=' + to);
         this.render(list, r.appointments);
-      } catch (e) { if (e.status === 401) { Auth.showLogin('Сессия истекла'); } else list.replaceChildren(h('p', { class: 'mut', text: e.message })); }
+      } catch (e) { if (e.status === 401) { Auth.showLogin(T('Сессия истекла')); } else list.replaceChildren(h('p', { class: 'mut', text: e.message })); }
     };
     await load(); this.timer = setInterval(load, 15000);
   },
   render(box, items) {
-    if (!items.length) { box.replaceChildren(h('p', { class: 'mut', text: 'На ближайшие дни приёмов нет. Нажмите «Новый приём».' })); return; }
+    if (!items.length) { box.replaceChildren(h('p', { class: 'mut', text: T('На ближайшие дни приёмов нет. Нажмите «Новый приём».') })); return; }
     const days = new Map();
     for (const a of items) { const k = fmtDate(a.scheduled); if (!days.has(k)) days.set(k, []); days.get(k).push(a); }
     const today = fmtDate(Math.floor(Date.now() / 1000));
     box.replaceChildren(...[...days].map(([k, arr]) => h('div', { class: 'stack' },
-      h('h3', { text: k === today ? 'Сегодня, ' + k : k }),
+      h('h3', { text: k === today ? T('Сегодня, ') + k : k }),
       h('div', { class: 'list' }, arr.map(a => h('div', { class: 'li' },
         h('span', { class: 'mono', text: fmtTime(a.scheduled) }),
-        h('div', { class: 'grow' }, h('div', { class: 't', text: a.patient_name || 'Без имени' }), h('div', { class: 'sm mut' }, 'Код ', h('span', { class: 'mono', text: a.code }))),
+        h('div', { class: 'grow' }, h('div', { class: 't', text: a.patient_name || T('Без имени') }), h('div', { class: 'sm mut' }, T('Код '), h('span', { class: 'mono', text: a.code }))),
         Ui.statusChip(a.status),
-        h('button', { class: 'ibtn', 'aria-label': 'Скопировать ссылку', title: 'Скопировать ссылку-приглашение', onclick: () => Ui.copy(a.link, 'Ссылка скопирована') }, icon('copy')),
-        a.status === 'completed' ? null : h('button', { class: 'btn pri', onclick: () => Doctor.open(a.id) }, 'Открыть')))))));
+        h('button', { class: 'ibtn', 'aria-label': T('Скопировать ссылку'), title: T('Скопировать ссылку-приглашение'), onclick: () => Ui.copy(a.link, T('Ссылка скопирована')) }, icon('copy')),
+        a.status === 'completed' ? null : h('button', { class: 'btn pri', onclick: () => Doctor.open(a.id) }, T('Открыть'))))))));
   },
   async newSheet() {
-    const name = Ui.input('text', 'Фамилия Имя Отчество'); name.setAttribute('list', 'ptlist'); name.autocomplete = 'off';
+    const name = Ui.input('text', T('Фамилия Имя Отчество')); name.setAttribute('list', 'ptlist'); name.autocomplete = 'off';
     const dl = h('datalist', { id: 'ptlist' });
     const map = new Map();
     const when = Ui.input('datetime-local'); const d = new Date(Date.now() + 3600e3); d.setMinutes(0, 0, 0);
     when.value = d.getFullYear() + '-' + pad2(d.getMonth() + 1) + '-' + pad2(d.getDate()) + 'T' + pad2(d.getHours()) + ':00';
-    const email = Ui.input('email', 'необязательно');
+    const email = Ui.input('email', T('необязательно'));
     const err = h('p', { class: 'sm', style: 'color:var(--badt);margin:0', role: 'alert' });
     let t = null;
     name.addEventListener('input', () => {
@@ -2671,10 +3526,10 @@ const Appointments = {
       }, 250);
     });
     const s = Ui.sheet({
-      title: 'Новый приём', actions: [{ label: 'Отмена', kind: 'sec' }, {
-        label: 'Создать', kind: 'pri', keep: true, onClick: async api => {
+      title: T('Новый приём'), actions: [{ label: T('Отмена'), kind: 'sec' }, {
+        label: T('Создать'), kind: 'pri', keep: true, onClick: async api => {
           err.textContent = '';
-          if (!name.value.trim()) { err.textContent = 'Укажите ФИО пациента'; return false; }
+          if (!name.value.trim()) { err.textContent = T('Укажите ФИО пациента'); return false; }
           try {
             const body = { scheduled: Math.floor(new Date(when.value).getTime() / 1000), email: email.value.trim() };
             if (map.has(name.value.trim())) body.patient_id = map.get(name.value.trim()); else body.full_name = name.value.trim();
@@ -2685,15 +3540,15 @@ const Appointments = {
         }
       }]
     });
-    s.el.append(Ui.field('ФИО (начните вводить, чтобы выбрать существующего пациента)', name), dl, Ui.field('Дата и время', when), Ui.field('Email для приглашения', email), err);
+    s.el.append(Ui.field(T('ФИО (начните вводить, чтобы выбрать существующего пациента)'), name), dl, Ui.field(T('Дата и время'), when), Ui.field(T('Email для приглашения'), email), err);
   },
   created(r) {
-    const s = Ui.sheet({ title: 'Приём создан', actions: [{ label: 'Готово', kind: 'pri' }] });
-    s.el.append(h('p', { class: 'mut', style: 'margin:0', text: 'Передайте пациенту ссылку или код. Регистрация пациенту не нужна.' }),
+    const s = Ui.sheet({ title: T('Приём создан'), actions: [{ label: T('Готово'), kind: 'pri' }] });
+    s.el.append(h('p', { class: 'mut', style: 'margin:0', text: T('Передайте пациенту ссылку или код. Регистрация пациенту не нужна.') }),
       h('div', { class: 'list' },
-        h('div', { class: 'li' }, h('div', { class: 'grow' }, h('div', { class: 'sm mut', text: 'Ссылка-приглашение' }), h('div', { class: 't mono sm', text: r.link })), h('button', { class: 'ibtn', 'aria-label': 'Скопировать ссылку', onclick: () => Ui.copy(r.link) }, icon('copy'))),
-        h('div', { class: 'li' }, h('div', { class: 'grow' }, h('div', { class: 'sm mut', text: 'Код' }), h('div', { class: 'mono', style: 'font-size:22px', text: r.code })), h('button', { class: 'ibtn', 'aria-label': 'Скопировать код', onclick: () => Ui.copy(r.code) }, icon('copy')))),
-      h('p', { class: 'sm mut', style: 'margin:0', text: r.email_sent ? 'Письмо с приглашением отправлено на email пациента.' : 'Автоматическая отправка писем не настроена (SMTP не задан).' }));
+        h('div', { class: 'li' }, h('div', { class: 'grow' }, h('div', { class: 'sm mut', text: T('Ссылка-приглашение') }), h('div', { class: 't mono sm', text: r.link })), h('button', { class: 'ibtn', 'aria-label': T('Скопировать ссылку'), onclick: () => Ui.copy(r.link) }, icon('copy'))),
+        h('div', { class: 'li' }, h('div', { class: 'grow' }, h('div', { class: 'sm mut', text: T('Код') }), h('div', { class: 'mono', style: 'font-size:22px', text: r.code })), h('button', { class: 'ibtn', 'aria-label': T('Скопировать код'), onclick: () => Ui.copy(r.code) }, icon('copy')))),
+      h('p', { class: 'sm mut', style: 'margin:0', text: r.email_sent ? T('Письмо с приглашением отправлено на email пациента.') : T('Автоматическая отправка писем не настроена (SMTP не задан).') }));
   }
 };
 
@@ -2702,11 +3557,11 @@ const Media = {
   stream: null, cam: null, screen: null, micOn: true, camOn: true, audioOnly: false, sharing: false, sel: { a: '', v: '' }, ac: null,
   explain(e) {
     const n = e && e.name;
-    if (!window.isSecureContext) return 'Камера и микрофон работают только на защищённом соединении (https://) или на localhost. Откройте страницу по https-адресу центра.';
-    if (n === 'NotAllowedError' || n === 'SecurityError') return 'Доступ к камере или микрофону запрещён. Разрешите его в настройках браузера (значок замка рядом с адресом) и нажмите «Повторить».';
-    if (n === 'NotFoundError' || n === 'OverconstrainedError') return 'Камера или микрофон не найдены. Подключите устройство или выберите другое.';
-    if (n === 'NotReadableError') return 'Устройство занято другим приложением. Закройте его и нажмите «Повторить».';
-    return 'Не удалось получить доступ к устройствам: ' + ((e && e.message) || n || 'неизвестная ошибка');
+    if (!window.isSecureContext) return T('Камера и микрофон работают только на защищённом соединении (https://) или на localhost. Откройте страницу по https-адресу центра.');
+    if (n === 'NotAllowedError' || n === 'SecurityError') return T('Доступ к камере или микрофону запрещён. Разрешите его в настройках браузера (значок замка рядом с адресом) и нажмите «Повторить».');
+    if (n === 'NotFoundError' || n === 'OverconstrainedError') return T('Камера или микрофон не найдены. Подключите устройство или выберите другое.');
+    if (n === 'NotReadableError') return T('Устройство занято другим приложением. Закройте его и нажмите «Повторить».');
+    return T('Не удалось получить доступ к устройствам: ') + ((e && e.message) || n || T('неизвестная ошибка'));
   },
   async start(opt) {
     opt = opt || {};
@@ -2724,7 +3579,7 @@ const Media = {
     if (!s) {
       s = await navigator.mediaDevices.getUserMedia({ audio });
       this.audioOnly = true; this.camOn = false;
-      if (vErr) Toast.show('Камера недоступна, включён режим только аудио', null, 5000);
+      if (vErr) Toast.show(T('Камера недоступна, включён режим только аудио'), null, 5000);
     } else { this.audioOnly = false; this.camOn = true; }
     this.stream = s; this.cam = s.getVideoTracks()[0] || null; this.micOn = true;
     return s;
@@ -2749,10 +3604,10 @@ const Media = {
     CallUi.setLocal(ns); if (old) old.getTracks().forEach(t => t.stop());
   },
   toggleMic() { this.micOn = !this.micOn; if (this.stream) this.stream.getAudioTracks().forEach(t => t.enabled = this.micOn); return this.micOn; },
-  toggleCam() { if (!this.cam) { Toast.show('Камера недоступна'); return false; } this.camOn = !this.camOn; this.cam.enabled = this.camOn; return this.camOn; },
+  toggleCam() { if (!this.cam) { Toast.show(T('Камера недоступна')); return false; } this.camOn = !this.camOn; this.cam.enabled = this.camOn; return this.camOn; },
   setAudioOnly(on) { if (!this.cam) return; this.cam.enabled = !on; this.camOn = !on; this.audioOnly = on; },
   async shareScreen() {
-    if (!navigator.mediaDevices.getDisplayMedia) { Toast.err('Демонстрация экрана не поддерживается этим браузером'); return false; }
+    if (!navigator.mediaDevices.getDisplayMedia) { Toast.err(T('Демонстрация экрана не поддерживается этим браузером')); return false; }
     try {
       const s = await navigator.mediaDevices.getDisplayMedia({ video: true });
       const t = s.getVideoTracks()[0];
@@ -2760,7 +3615,7 @@ const Media = {
       t.onended = () => this.stopShare();
       if (Rtc.senders.video) await Rtc.senders.video.replaceTrack(t);
       CallUi.shareChanged(true); return true;
-    } catch (e) { if (e.name !== 'NotAllowedError') Toast.err('Не удалось начать демонстрацию экрана'); return false; }
+    } catch (e) { if (e.name !== 'NotAllowedError') Toast.err(T('Не удалось начать демонстрацию экрана')); return false; }
   },
   async stopShare() {
     if (!this.sharing) return;
@@ -2820,7 +3675,7 @@ const Rtc = {
       await pc.setLocalDescription(o);
       await Api.ev('offer', { sdp: { type: o.type, sdp: o.sdp } });
       this.setState(State.v.rtc === 'reconnecting' ? 'reconnecting' : 'connecting');
-    } catch (e) { if (!(e instanceof ApiErr && e.status === 410)) { console.error(e); Toast.err('Не удалось установить соединение, пробую ещё раз'); } }
+    } catch (e) { if (!(e instanceof ApiErr && e.status === 410)) { console.error(e); Toast.err(T('Не удалось установить соединение, пробую ещё раз')); } }
     finally { this.makingOffer = false; }
   },
   async flush() {
@@ -2847,7 +3702,7 @@ const Rtc = {
         if (!this.pc || !this.pc.remoteDescription) { this.queue.push(d.candidate); return; }
         try { await this.pc.addIceCandidate(d.candidate); } catch (e) { if (!this.ignoreOffer) console.warn('ice', e); }
       }
-    } catch (e) { console.error(e); Toast.err('Ошибка установки соединения'); }
+    } catch (e) { console.error(e); Toast.err(T('Ошибка установки соединения')); }
   },
   onIce(pc) {
     if (pc !== this.pc) return;
@@ -2890,7 +3745,7 @@ const Quality = {
     let level = 'good';
     if (loss > 0.06 || (rtt != null && rtt > 0.5)) level = 'bad'; else if (loss > 0.02 || (rtt != null && rtt > 0.25)) level = 'mid';
     State.set({ quality: { level, loss, rtt } });
-    if (level === 'bad') { if (++this.bad === 2) Toast.show('Связь плохая. Включите режим «Только аудио» через кнопку «Ещё».', null, 7000); } else this.bad = 0;
+    if (level === 'bad') { if (++this.bad === 2) Toast.show(T('Связь плохая. Включите режим «Только аудио» через кнопку «Ещё».'), null, 7000); } else this.bad = 0;
   }
 };
 
@@ -2934,18 +3789,18 @@ const Poller = {
 };
 
 /* ===== Пациент: код, согласие, проверка оборудования, ожидание ===== */
-const CONSENT_TEXT = 'Я даю согласие на проведение консультации в дистанционной форме (видеосвязь) и на обработку моих персональных данных в объёме, необходимом для оказания медицинской помощи. Я понимаю, что дистанционная консультация не заменяет очный осмотр.'; // шаблон: юрист центра заменяет текст перед пилотом
+const CONSENT_TEXT = T('Я даю согласие на проведение консультации в дистанционной форме (видеосвязь) и на обработку моих персональных данных в объёме, необходимом для оказания медицинской помощи. Я понимаю, что дистанционная консультация не заменяет очный осмотр.'); // шаблон: юрист центра заменяет текст перед пилотом
 const Session = {
   code: null, hb: null,
   key() { return 'mars_pt_' + this.code; },
   askCode(msg) {
     State.set({ role: 'patient', view: 'code' }); Header.update();
-    const inp = Ui.input('text', 'Код из приглашения'); inp.maxLength = 8; inp.className += ' mono'; inp.style.cssText = 'text-align:center;font-size:22px;text-transform:uppercase';
+    const inp = Ui.input('text', T('Код из приглашения')); inp.maxLength = 8; inp.className += ' mono'; inp.style.cssText = 'text-align:center;font-size:22px;text-transform:uppercase';
     const err = h('p', { class: 'sm', style: 'color:var(--badt);margin:0;min-height:20px', role: 'alert', text: msg || '' });
-    const go = e => { e.preventDefault(); const c = inp.value.toUpperCase().replace(/[^A-Z0-9]/g, ''); if (c.length < 4) { err.textContent = 'Введите код из приглашения'; return; } this.start(c); };
-    $('#main').replaceChildren(h('div', { class: 'center-col' }, Ui.bigToggle(), h('h1', { text: 'Консультация' }), h('p', { class: 'mut', text: Cfg.center }),
-      h('form', { class: 'stack', style: 'width:min(340px,100%)', onsubmit: go }, Ui.field('Код консультации', inp), err, h('button', { class: 'btn pri lg', type: 'submit', text: 'Продолжить' })),
-      Auth.doctor || Cfg.auth ? h('button', { class: 'btn txt', onclick: () => Auth.showLogin(), text: 'Вход для врача' }) : null));
+    const go = e => { e.preventDefault(); const c = inp.value.toUpperCase().replace(/[^A-Z0-9]/g, ''); if (c.length < 4) { err.textContent = T('Введите код из приглашения'); return; } this.start(c); };
+    $('#main').replaceChildren(h('div', { class: 'center-col' }, h('div', { class: 'row wrap' }, Ui.bigToggle(), Ui.langToggle()), h('h1', { text: T('Консультация') }), h('p', { class: 'mut', text: Cfg.center }),
+      h('form', { class: 'stack', style: 'width:min(340px,100%)', onsubmit: go }, Ui.field(T('Код консультации'), inp), err, h('button', { class: 'btn pri lg', type: 'submit', text: T('Продолжить') })),
+      Auth.doctor || Cfg.auth ? h('button', { class: 'btn txt', onclick: () => Auth.showLogin(), text: T('Вход для врача') }) : null));
     inp.focus();
   },
   async start(code) {
@@ -2953,24 +3808,24 @@ const Session = {
     State.set({ role: 'patient', view: 'join' }); Header.update();
     let info;
     try { info = await Api.get('/rooms/' + this.code + '/info', { token: false }); }
-    catch (e) { this.askCode(e.status === 404 ? 'Комната не найдена. Проверьте код.' : e.status === 410 ? 'Эта консультация уже завершена.' : e.message); return; }
+    catch (e) { this.askCode(e.status === 404 ? T('Комната не найдена. Проверьте код.') : e.status === 410 ? T('Эта консультация уже завершена.') : e.message); return; }
     let saved = null; try { saved = sessionStorage.getItem(this.key()); } catch (e) { /* нет хранилища */ }
     if (saved) { Api.room = this.code; Api.token = saved; return this.join(); }
     this.showConsent(info);
   },
   showConsent(info) {
     const cb = h('input', { type: 'checkbox', id: 'consent', 'aria-describedby': 'consent-text' });
-    const btn = h('button', { class: 'btn pri lg', disabled: true, onclick: () => this.join(true) }, 'Продолжить');
+    const btn = h('button', { class: 'btn pri lg', disabled: true, onclick: () => this.join(true) }, T('Продолжить'));
     cb.addEventListener('change', () => { btn.disabled = !cb.checked; });
     $('#main').replaceChildren(h('div', { class: 'page' }, h('div', { class: 'stack' },
-      Ui.bigToggle(),
-      h('h1', { text: info.center }),
+      h('div', { class: 'row wrap' }, Ui.bigToggle(), Ui.langToggle()),
+      h('h1', { text: T(info.center) }),
       h('div', { class: 'list' },
-        h('div', { class: 'li' }, icon('user'), h('div', { class: 'grow' }, h('div', { class: 'sm mut', text: 'Врач' }), h('div', { text: info.doctor || 'Врач центра' }))),
-        h('div', { class: 'li' }, icon('calendar'), h('div', { class: 'grow' }, h('div', { class: 'sm mut', text: 'Время' }), h('div', { text: fmtDT(info.scheduled) })))),
-      h('h2', { class: 'consent-h', text: 'Согласие' }),
+        h('div', { class: 'li' }, icon('user'), h('div', { class: 'grow' }, h('div', { class: 'sm mut', text: T('Врач') }), h('div', { text: T(info.doctor) || T('Врач центра') }))),
+        h('div', { class: 'li' }, icon('calendar'), h('div', { class: 'grow' }, h('div', { class: 'sm mut', text: T('Время') }), h('div', { text: fmtDT(info.scheduled) })))),
+      h('h2', { class: 'consent-h', text: T('Согласие') }),
       h('p', { id: 'consent-text', class: 'consent-text', text: CONSENT_TEXT }),
-      h('label', { class: 'consent-row', for: 'consent' }, cb, h('span', { text: 'Я согласен(на) на дистанционную консультацию и обработку персональных данных' })),
+      h('label', { class: 'consent-row', for: 'consent' }, cb, h('span', { text: T('Я согласен(на) на дистанционную консультацию и обработку персональных данных') })),
       btn)));
   },
   async join(withConsent) {
@@ -2980,8 +3835,8 @@ const Session = {
       try { sessionStorage.setItem(this.key(), r.token); } catch (e) { /* ignore */ }
     } catch (e) {
       Api.token = null;
-      if (e.status === 409) this.askCode('В комнате уже есть пациент. Если это вы, обратитесь в центр.');
-      else this.askCode(e.status === 410 ? 'Эта консультация уже завершена.' : e.status === 404 ? 'Комната не найдена.' : e.message);
+      if (e.status === 409) this.askCode(T('В комнате уже есть пациент. Если это вы, обратитесь в центр.'));
+      else this.askCode(e.status === 410 ? T('Эта консультация уже завершена.') : e.status === 404 ? T('Комната не найдена.') : e.message);
       return;
     }
     this.precheck();
@@ -2990,11 +3845,11 @@ const Session = {
     State.set({ view: 'precheck' }); Header.update();
     const vid = h('video', { autoplay: true, muted: true, playsinline: true, class: 'mirror', style: 'width:100%;aspect-ratio:4/3;object-fit:cover;background:#000;border-radius:var(--r2)' });
     const msg = h('div', { class: 'banner warn hidden', role: 'alert' });
-    const meter = h('div', { class: 'meter', role: 'progressbar', 'aria-label': 'Уровень микрофона' }, h('i'));
+    const meter = h('div', { class: 'meter', role: 'progressbar', 'aria-label': T('Уровень микрофона') }, h('i'));
     const selV = h('select', { class: 'inp' }), selA = h('select', { class: 'inp' });
-    const go = h('button', { class: 'btn pri lg', disabled: true }, 'Войти в комнату ожидания');
-    const retry = h('button', { class: 'btn sec hidden' }, 'Повторить');
-    const noVid = h('button', { class: 'btn sec hidden' }, 'Продолжить без видео');
+    const go = h('button', { class: 'btn pri lg', disabled: true }, T('Войти в комнату ожидания'));
+    const retry = h('button', { class: 'btn sec hidden' }, T('Повторить'));
+    const noVid = h('button', { class: 'btn sec hidden' }, T('Продолжить без видео'));
     let raf = null, an = null;
     const stopMeter = () => { if (raf) Loop.del(raf); raf = null; };
     const startMeter = stream => {
@@ -3008,7 +3863,7 @@ const Session = {
     };
     const fillDevices = async () => {
       const d = await Media.devices();
-      for (const [sel, list, k, nm] of [[selV, d.v, 'v', 'Камера'], [selA, d.a, 'a', 'Микрофон']]) {
+      for (const [sel, list, k, nm] of [[selV, d.v, 'v', T('Камера')], [selA, d.a, 'a', T('Микрофон')]]) {
         sel.replaceChildren(); list.forEach((x, i) => sel.append(h('option', { value: x.deviceId, text: x.label || (nm + ' ' + (i + 1)) })));
         const cur = (k === 'v' ? Media.cam : Media.stream && Media.stream.getAudioTracks()[0]); const id = cur && cur.getSettings().deviceId; if (id) sel.value = id;
       }
@@ -3017,7 +3872,7 @@ const Session = {
       msg.classList.add('hidden'); retry.classList.add('hidden'); noVid.classList.add('hidden');
       try {
         const s = await Media.start(opt); vid.srcObject = s; startMeter(s); await fillDevices(); go.disabled = false;
-        if (Media.audioOnly) { msg.textContent = 'Камера недоступна: консультация будет только по аудио.'; msg.classList.remove('hidden'); }
+        if (Media.audioOnly) { msg.textContent = T('Камера недоступна: консультация будет только по аудио.'); msg.classList.remove('hidden'); }
       } catch (e) {
         msg.textContent = Media.explain(e); msg.classList.remove('hidden'); retry.classList.remove('hidden'); if (window.isSecureContext) noVid.classList.remove('hidden');
       }
@@ -3026,9 +3881,9 @@ const Session = {
     selV.onchange = async () => { Media.sel.v = selV.value; await open(); };
     selA.onchange = async () => { Media.sel.a = selA.value; await open(); };
     go.onclick = () => { stopMeter(); this.enterWaiting(); };
-    $('#main').replaceChildren(h('div', { class: 'page' }, h('div', { class: 'stack' }, h('h1', { text: 'Проверка оборудования' }),
-      !window.isSecureContext ? h('div', { class: 'banner bad', role: 'alert', text: 'Страница открыта без защищённого соединения: камера и микрофон будут недоступны. Откройте ссылку по https://.' }) : null,
-      vid, msg, Ui.field('Камера', selV), Ui.field('Микрофон', selA), h('div', { class: 'field' }, h('label', { text: 'Уровень микрофона: скажите что-нибудь' }), meter),
+    $('#main').replaceChildren(h('div', { class: 'page' }, h('div', { class: 'stack' }, h('h1', { text: T('Проверка оборудования') }),
+      !window.isSecureContext ? h('div', { class: 'banner bad', role: 'alert', text: T('Страница открыта без защищённого соединения: камера и микрофон будут недоступны. Откройте ссылку по https://.') }) : null,
+      vid, msg, Ui.field(T('Камера'), selV), Ui.field(T('Микрофон'), selA), h('div', { class: 'field' }, h('label', { text: T('Уровень микрофона: скажите что-нибудь') }), meter),
       h('div', { class: 'row wrap' }, retry, noVid), go)));
     await open();
   },
@@ -3048,18 +3903,18 @@ const Session = {
 const Doctor = {
   async open(id) {
     State.set({ role: 'doctor', view: 'loading' }); Header.update();
-    $('#main').replaceChildren(h('div', { class: 'center-col' }, h('div', { class: 'sk', style: 'width:240px;height:24px' }), h('p', { class: 'mut', text: 'Открываю комнату' })));
+    $('#main').replaceChildren(h('div', { class: 'center-col' }, h('div', { class: 'sk', style: 'width:240px;height:24px' }), h('p', { class: 'mut', text: T('Открываю комнату') })));
     clearInterval(Appointments.timer);
     try {
       const r = await Api.post('/rooms', { appointment_id: id });
       Api.room = r.room; Api.token = r.token; this.apptId = id;
       history.replaceState(null, '', location.pathname + '#appt=' + id);
-    } catch (e) { Toast.err(e); if (e.status === 401) Auth.showLogin('Сессия истекла'); else Appointments.show(); return; }
+    } catch (e) { Toast.err(e); if (e.status === 401) Auth.showLogin(T('Сессия истекла')); else Appointments.show(); return; }
     let proto = {};
     try { proto = await Api.get('/rooms/' + Api.room + '/protocol'); } catch (e) { Toast.err(e); Appointments.show(); return; }
     App.proto = proto;
     try { await Media.start(); }
-    catch (e) { try { await Media.start({ audioOnly: true }); Toast.show('Камера недоступна: аудио только'); } catch (e2) { Toast.show(Media.explain(e2), 'err', 8000); } }
+    catch (e) { try { await Media.start({ audioOnly: true }); Toast.show(T('Камера недоступна: аудио только')); } catch (e2) { Toast.show(Media.explain(e2), 'err', 8000); } }
     try { await Rtc.init(); } catch (e) { Toast.err(e); }
     State.set({ view: 'call', status: proto.status, peerHere: proto.status === 'waiting', faceConsent: false });
     CallUi.build(); Record.load(proto);
@@ -3088,28 +3943,29 @@ const Header = {
     const v = State.v, inRoom = !!Api.room && v.view === 'call';
     const kids = [h('div', { class: 'brand' }, Cfg.center, ' ', h('span', { text: 'M.A.R.S.' })), h('div', { class: 'sp' })];
     const down = Services.down();
-    if (down.length) kids.push(h('div', { class: 'net', role: 'status', title: 'Недоступны: ' + down.join(', ') }, h('span', { class: 'dot bad' }), h('span', { class: 'only-wide', text: 'Сервисы: ' + down.length })));
-    kids.push(h('div', { class: 'net', role: 'status' }, h('span', { class: 'dot ' + (v.net ? 'ok' : 'bad') }), h('span', { class: 'only-wide', text: v.net ? 'В сети' : 'Нет связи' })));
-    if (inRoom) kids.push(h('div', { class: 'codebox' }, h('span', { class: 'mut', text: 'Код' }), h('span', { class: 'mono', text: Api.room }),
-      h('button', { class: 'ibtn', style: 'width:32px;height:32px', 'aria-label': 'Скопировать код сессии', title: 'Скопировать код', onclick: () => Ui.copy(Api.room, 'Код скопирован') }, icon('copy'))));
+    if (down.length) kids.push(h('div', { class: 'net', role: 'status', title: T('Недоступны: ') + down.join(', ') }, h('span', { class: 'dot bad' }), h('span', { class: 'only-wide', text: T('Сервисы: ') + down.length })));
+    kids.push(h('div', { class: 'net', role: 'status' }, h('span', { class: 'dot ' + (v.net ? 'ok' : 'bad') }), h('span', { class: 'only-wide', text: v.net ? T('В сети') : T('Нет связи') })));
+    if (inRoom) kids.push(h('div', { class: 'codebox' }, h('span', { class: 'mut', text: T('Код') }), h('span', { class: 'mono', text: Api.room }),
+      h('button', { class: 'ibtn', style: 'width:32px;height:32px', 'aria-label': T('Скопировать код сессии'), title: T('Скопировать код'), onclick: () => Ui.copy(Api.room, T('Код скопирован')) }, icon('copy'))));
     const big = Ui.isBig();
-    kids.push(h('button', { class: 'ibtn', 'aria-label': 'Крупно и контрастно', 'aria-pressed': String(big), title: big ? 'Обычный вид' : 'Крупно и контрастно', onclick: () => { Ui.big(); this.update(); } }, icon('text')));
-    kids.push(h('button', { class: 'ibtn', 'aria-label': 'Меню', title: 'Меню', onclick: () => this.menu() }, icon('menu')));
+    kids.push(h('button', { class: 'ibtn', 'aria-label': T('Крупно и контрастно'), 'aria-pressed': String(big), title: big ? T('Обычный вид') : T('Крупно и контрастно'), onclick: () => { Ui.big(); this.update(); } }, icon('text')));
+    kids.push(h('button', { class: 'ibtn', 'aria-label': T('Меню'), title: T('Меню'), onclick: () => this.menu() }, icon('menu')));
     this.el.replaceChildren(...kids);
   },
   menu() {
     const v = State.v, inRoom = !!Api.room && v.view === 'call', doc = v.role === 'doctor';
-    const s = Ui.sheet({ title: 'Меню' });
+    const s = Ui.sheet({ title: T('Меню') });
     const item = (ic, text, fn, danger) => h('button', { class: 'li', style: 'width:100%;text-align:left' + (danger ? ';color:var(--badt)' : ''), onclick: async () => { s.close(); await fn(); } }, icon(ic), h('span', { class: 'grow', text }));
     const list = h('div', { class: 'list' });
-    if (doc || (Auth.doctor && v.view !== 'join')) list.append(item('calendar', 'Приёмы', () => App.toAppointments()));
-    if (Auth.doctor && Auth.doctor.admin) list.append(item('list', 'Журнал аудита', () => App.auditSheet()));
-    list.append(item('text', Ui.isBig() ? 'Обычный вид' : 'Крупно и контрастно', () => { Ui.big(); this.update(); }));
+    if (doc || (Auth.doctor && v.view !== 'join')) list.append(item('calendar', T('Приёмы'), () => App.toAppointments()));
+    if (Auth.doctor && Auth.doctor.admin) list.append(item('list', T('Журнал аудита'), () => App.auditSheet()));
+    list.append(item('text', Ui.isBig() ? T('Обычный вид') : T('Крупно и контрастно'), () => { Ui.big(); this.update(); }));
+    list.append(item('text', Ui.langName(Ui.otherLang()), () => Ui.setLang(Ui.otherLang())));
     if (inRoom && doc) {
-      list.append(item('user', 'Освободить место пациента', async () => { try { await Api.ev('control', { action: 'reset_patient' }); Toast.show('Пациент сможет войти заново по ссылке'); } catch (e) { Toast.err(e); } }));
-      list.append(item('alert', 'Экстренное завершение', () => App.emergency(), true));
+      list.append(item('user', T('Освободить место пациента'), async () => { try { await Api.ev('control', { action: 'reset_patient' }); Toast.show(T('Пациент сможет войти заново по ссылке')); } catch (e) { Toast.err(e); } }));
+      list.append(item('alert', T('Экстренное завершение'), () => App.emergency(), true));
     }
-    if (Auth.doctor && Cfg.auth) list.append(item('logout', 'Выйти', () => Auth.logout()));
+    if (Auth.doctor && Cfg.auth) list.append(item('logout', T('Выйти'), () => Auth.logout()));
     s.el.append(list);
   }
 };
@@ -3120,35 +3976,35 @@ const CallUi = {
   build() {
     const isDoc = State.v.role === 'doctor', R = this.r = {};
     this.panes = {}; this.tabBtn = {}; this.t0 = 0;
-    R.remote = h('video', { autoplay: true, playsinline: true, 'aria-label': 'Видео собеседника' });
+    R.remote = h('video', { autoplay: true, playsinline: true, 'aria-label': T('Видео собеседника') });
     R.ovR = h('canvas', { class: 'ov' });
     R.stage = h('div', { class: 'vstage' }, R.remote, R.ovR);
-    R.local = h('video', { autoplay: true, playsinline: true, class: 'mirror', 'aria-label': 'Ваше видео' }); R.local.muted = true;
+    R.local = h('video', { autoplay: true, playsinline: true, class: 'mirror', 'aria-label': T('Ваше видео') }); R.local.muted = true;
     R.ovL = h('canvas', { class: 'ov mirror' });
-    R.self = h('div', { class: 'selfview', 'aria-label': 'Самовидение, можно перетаскивать' }, R.local, R.ovL);
+    R.self = h('div', { class: 'selfview', 'aria-label': T('Самовидение, можно перетаскивать') }, R.local, R.ovL);
     R.qdot = h('span', { class: 'dot' }); R.qtxt = h('span', { class: 'sm', text: '' }); R.timer = h('span', { class: 'mono sm', text: '00:00' });
-    const peer = isDoc ? (App.proto.appointment && App.proto.appointment.patient_name) || 'Пациент' : (App.proto.appointment && App.proto.appointment.doctor) || 'Врач';
+    const peer = isDoc ? (App.proto.appointment && App.proto.appointment.patient_name) || T('Пациент') : T(App.proto.appointment && App.proto.appointment.doctor) || T('Врач');
     R.vtop = h('div', { class: 'vtop' }, h('span', { class: 'grow', text: peer }), R.qdot, R.qtxt, R.timer);
     R.vmsg = h('div', { class: 'vmsg' });
     R.hint = h('div', { class: 'hint', role: 'status', 'aria-live': 'polite' });
     R.pq = h('div', { class: 'pqual hidden' });
     /* подпись под каждой кнопкой (data-short): иконка без слов непонятна; на телефоне класс wide-only прячет лишнее */
     const cb = (name, label, fn, short, wideOnly) => h('button', { class: 'cb' + (wideOnly ? ' wide-only' : ''), 'aria-label': label, title: label, 'data-short': short, 'aria-pressed': 'false', onclick: fn }, icon(name));
-    R.bMic = cb('mic', 'Микрофон (M)', () => this.toggleMic(), 'Микрофон');
-    R.bCam = cb('video', 'Камера (V)', () => this.toggleCam(), 'Камера');
-    R.bScr = cb('screen', 'Демонстрация экрана', async e => { if (Media.sharing) await Media.stopShare(); else await Media.shareScreen(); }, 'Экран', true);
-    R.bMesh = cb('mesh', isDoc ? 'Сетка лица (F)' : 'Задания для лица', () => { if (isDoc) FaceMesh.toggle(); else FaceMesh.openTasks(); }, isDoc ? 'Сетка' : 'Задания', !isDoc);
-    R.bMore = cb('more', 'Ещё', () => this.moreSheet(), 'Ещё');
-    R.bEnd = cb('end', isDoc ? 'Завершить приём' : 'Выйти', () => this.endClick(), isDoc ? 'Завершить' : 'Выйти'); R.bEnd.classList.add('end');
+    R.bMic = cb('mic', T('Микрофон (M)'), () => this.toggleMic(), T('Микрофон'));
+    R.bCam = cb('video', T('Камера (V)'), () => this.toggleCam(), T('Камера'));
+    R.bScr = cb('screen', T('Демонстрация экрана'), async e => { if (Media.sharing) await Media.stopShare(); else await Media.shareScreen(); }, T('Экран'), true);
+    R.bMesh = cb('mesh', isDoc ? T('Сетка лица (F)') : T('Задания для лица'), () => { if (isDoc) FaceMesh.toggle(); else FaceMesh.openTasks(); }, isDoc ? T('Сетка') : T('Задания'), !isDoc);
+    R.bMore = cb('more', T('Ещё'), () => this.moreSheet(), T('Ещё'));
+    R.bEnd = cb('end', isDoc ? T('Завершить приём') : T('Выйти'), () => this.endClick(), isDoc ? T('Завершить') : T('Выйти')); R.bEnd.classList.add('end');
     const bar = [R.bMic, R.bCam, R.bScr, R.bMesh];
-    if (!isDoc) { R.bSide = cb('chat', 'Чат и файлы', () => { R.layout.classList.toggle('noside'); R.bSide.setAttribute('aria-pressed', String(!R.layout.classList.contains('noside'))); if (window.matchMedia('(max-width:700px)').matches) this.showTab('chat'); }, 'Чат', true); bar.push(R.bSide); }
+    if (!isDoc) { R.bSide = cb('chat', T('Чат и файлы'), () => { R.layout.classList.toggle('noside'); R.bSide.setAttribute('aria-pressed', String(!R.layout.classList.contains('noside'))); if (window.matchMedia('(max-width:700px)').matches) this.showTab('chat'); }, T('Чат'), true); bar.push(R.bSide); }
     bar.push(R.bMore, R.bEnd);
-    R.bar = h('div', { class: 'callbar', role: 'toolbar', 'aria-label': 'Управление звонком' }, bar);
+    R.bar = h('div', { class: 'callbar', role: 'toolbar', 'aria-label': T('Управление звонком') }, bar);
     R.wrap = h('div', { class: 'callwrap' }, R.stage, R.self, R.vtop, R.vmsg, R.pq, R.hint, R.bar);
     R.center = h('div', { class: 'center' }, R.wrap);
     /* панели */
-    const tabs = isDoc ? [['card', 'Карточка', 'user'], ['face', 'Лицо', 'face'], ['chat', 'Чат', 'chat'], ['files', 'Файлы', 'file'], ['tr', 'Расшифровка', 'text'], ['concl', 'Заключение', 'doc']]
-      : [['chat', 'Чат', 'chat'], ['files', 'Файлы', 'file'], ['face', 'Задания', 'face']];
+    const tabs = isDoc ? [['card', T('Карточка'), 'user'], ['face', T('Лицо'), 'face'], ['chat', T('Чат'), 'chat'], ['files', T('Файлы'), 'file'], ['tr', T('Расшифровка'), 'text'], ['concl', T('Заключение'), 'doc']]
+      : [['chat', T('Чат'), 'chat'], ['files', T('Файлы'), 'file'], ['face', T('Задания'), 'face']];
     const content = {
       chat: Chat.build(), files: Files.build(),
       face: isDoc ? FaceMesh.doctorPane() : FaceMesh.patientPane()
@@ -3158,7 +4014,7 @@ const CallUi = {
     if (isDoc) this.panes.card.append(R.cardBody);
     R.tabs = h('div', { class: 'tabs', role: 'tablist' }, tabs.map(([k, label]) => { const b = h('button', { role: 'tab', 'aria-selected': 'false', onclick: () => this.showTab(k) }, label); this.tabBtn[k] = b; return b; }));
     R.rside = h('aside', { class: 'rside' }, R.tabs, tabs.map(([k]) => this.panes[k]));
-    R.pbar = h('nav', { class: 'pbar', 'aria-label': 'Разделы' }, [h('button', { 'aria-selected': 'true', 'data-t': 'video', onclick: () => this.showTab('video') }, icon('video'), 'Видео')].concat(tabs.map(([k, label, ic]) => h('button', { 'aria-selected': 'false', 'data-t': k, onclick: () => this.showTab(k) }, icon(ic), label))));
+    R.pbar = h('nav', { class: 'pbar', 'aria-label': T('Разделы') }, [h('button', { 'aria-selected': 'true', 'data-t': 'video', onclick: () => this.showTab('video') }, icon('video'), T('Видео'))].concat(tabs.map(([k, label, ic]) => h('button', { 'aria-selected': 'false', 'data-t': k, onclick: () => this.showTab(k) }, icon(ic), label))));
     R.lside = isDoc ? h('aside', { class: 'lside' }) : null;
     R.layout = h('div', { class: 'dlayout' + (isDoc ? '' : ' pat noside'), 'data-ptab': 'video' }, R.lside, R.center, R.rside, R.pbar);
     $('#main').replaceChildren(R.layout);
@@ -3221,21 +4077,21 @@ const CallUi = {
     const R = this.r; if (!R.vmsg) return;
     const v = State.v, isDoc = v.role === 'doctor';
     let title = '', sub = '', btn = false, show = true;
-    if (v.status === 'completed') { title = 'Консультация завершена'; sub = isDoc ? 'Заполните заключение и отправьте его пациенту.' : 'Спасибо. Документы от врача появятся в чате и в разделе «Файлы».'; }
+    if (v.status === 'completed') { title = T('Консультация завершена'); sub = isDoc ? T('Заполните заключение и отправьте его пациенту.') : T('Спасибо. Документы от врача появятся в чате и в разделе «Файлы».'); }
     else if (v.status === 'in_progress') {
       if (v.rtc === 'connected') show = false;
-      else { title = v.rtc === 'reconnecting' ? 'Восстанавливаю связь' : 'Подключение'; sub = isDoc ? (v.peerHere ? 'Устанавливаю соединение с пациентом' : 'Ждём подключения пациента') : 'Ожидаем подключения врача'; }
-    } else if (isDoc) { title = v.peerHere ? 'Пациент ожидает' : 'Ожидаем пациента'; sub = v.peerHere ? 'Укажите адрес и телефон пациента и начните приём' : 'Пациент ещё не вошёл в комнату'; btn = true; }
-    else { title = 'Врач скоро подключится'; sub = 'Оставайтесь на этой странице'; }
+      else { title = v.rtc === 'reconnecting' ? T('Восстанавливаю связь') : T('Подключение'); sub = isDoc ? (v.peerHere ? T('Устанавливаю соединение с пациентом') : T('Ждём подключения пациента')) : T('Ожидаем подключения врача'); }
+    } else if (isDoc) { title = v.peerHere ? T('Пациент ожидает') : T('Ожидаем пациента'); sub = v.peerHere ? T('Укажите адрес и телефон пациента и начните приём') : T('Пациент ещё не вошёл в комнату'); btn = true; }
+    else { title = T('Врач скоро подключится'); sub = T('Оставайтесь на этой странице'); }
     R.vmsg.classList.toggle('hidden', !show);
     /* replaceChildren(null) выводит слово «null»: пустые элементы отбрасываются */
     if (show) R.vmsg.replaceChildren(...[h('h2', { text: title }), h('p', { style: 'margin:0;opacity:.8', text: sub }),
-      btn ? h('button', { class: 'btn pri lg', onclick: () => this.start() }, 'Начать приём') : null].filter(Boolean));
-    const q = v.quality, L = { good: ['ok', 'Связь: хорошая'], mid: ['mid', 'Связь: средняя'], bad: ['bad', 'Связь: плохая'] }[q ? q.level : ''];
-    R.qdot.className = 'dot ' + (L ? L[0] : ''); R.qtxt.textContent = L ? L[1] : (v.rtc === 'reconnecting' ? 'Переподключение' : '');
+      btn ? h('button', { class: 'btn pri lg', onclick: () => this.start() }, T('Начать приём')) : null].filter(Boolean));
+    const q = v.quality, L = { good: ['ok', T('Связь: хорошая')], mid: ['mid', T('Связь: средняя')], bad: ['bad', T('Связь: плохая')] }[q ? q.level : ''];
+    R.qdot.className = 'dot ' + (L ? L[0] : ''); R.qtxt.textContent = L ? L[1] : (v.rtc === 'reconnecting' ? T('Переподключение') : '');
   },
   async start() {
-    if (!Record.locOk()) { Toast.show('Укажите адрес и телефон пациента'); this.showTab('card'); Record.focusLoc(); return; }
+    if (!Record.locOk()) { Toast.show(T('Укажите адрес и телефон пациента')); this.showTab('card'); Record.focusLoc(); return; }
     try {
       await Record.saveLocation();
       await Api.ev('control', { action: 'start' });
@@ -3243,24 +4099,24 @@ const CallUi = {
       await Rtc.startAsDoctor();
     } catch (e) { Toast.err(e); }
   },
-  peerLeft() { Toast.show('Собеседник отключился', null, 5000); State.set({ peerHere: false }); this.refresh(); },
+  peerLeft() { Toast.show(T('Собеседник отключился'), null, 5000); State.set({ peerHere: false }); this.refresh(); },
   async endClick() {
     if (State.v.role === 'doctor') {
       if (State.v.status === 'completed') return;
-      if (!(await Ui.confirm('Завершить приём?', 'Видеосвязь будет закрыта. Затем можно заполнить заключение.', 'Завершить', true))) return;
+      if (!(await Ui.confirm(T('Завершить приём?'), T('Видеосвязь будет закрыта. Затем можно заполнить заключение.'), T('Завершить'), true))) return;
       try { await Api.ev('control', { action: 'end' }); } catch (e) { Toast.err(e); return; }
       Events.ended(); this.showTab('concl');
-      Ui.sheet({ title: 'Приём завершён', actions: [{ label: 'Позже', kind: 'sec' }, { label: 'Заполнить заключение', kind: 'pri', onClick: () => { this.showTab('concl'); } }] }).el.append(h('p', { style: 'margin:0', text: 'Заполните заключение консультации и отправьте его пациенту.' }));
+      Ui.sheet({ title: T('Приём завершён'), actions: [{ label: T('Позже'), kind: 'sec' }, { label: T('Заполнить заключение'), kind: 'pri', onClick: () => { this.showTab('concl'); } }] }).el.append(h('p', { style: 'margin:0', text: T('Заполните заключение консультации и отправьте его пациенту.') }));
     } else {
-      if (!(await Ui.confirm('Покинуть консультацию?', 'Вы сможете вернуться по той же ссылке, пока врач не завершит приём.', 'Выйти', true))) return;
+      if (!(await Ui.confirm(T('Покинуть консультацию?'), T('Вы сможете вернуться по той же ссылке, пока врач не завершит приём.'), T('Выйти'), true))) return;
       try { await Api.ev('presence', { state: 'left' }); } catch (e) { /* ignore */ }
       App.teardown();
-      $('#main').replaceChildren(h('div', { class: 'center-col' }, h('h1', { text: 'Вы вышли из консультации' }), h('p', { class: 'mut', text: 'Чтобы вернуться, откройте ссылку-приглашение ещё раз.' }),
-        h('button', { class: 'btn pri lg', onclick: () => location.reload() }, 'Вернуться')));
+      $('#main').replaceChildren(h('div', { class: 'center-col' }, h('h1', { text: T('Вы вышли из консультации') }), h('p', { class: 'mut', text: T('Чтобы вернуться, откройте ссылку-приглашение ещё раз.') }),
+        h('button', { class: 'btn pri lg', onclick: () => location.reload() }, T('Вернуться'))));
     }
   },
   async moreSheet() {
-    const s = Ui.sheet({ title: 'Ещё' });
+    const s = Ui.sheet({ title: T('Ещё') });
     const d = await Media.devices();
     const mk = (label, list, kind) => {
       const sel = h('select', { class: 'inp' }); list.forEach((x, i) => sel.append(h('option', { value: x.deviceId, text: x.label || (label + ' ' + (i + 1)) })));
@@ -3268,17 +4124,17 @@ const CallUi = {
       sel.onchange = async () => { try { await Media.switchDevice(kind, sel.value); } catch (e) { Toast.show(Media.explain(e), 'err', 6000); } };
       return Ui.field(label, sel);
     };
-    s.el.append(mk('Камера', d.v, 'v'), mk('Микрофон', d.a, 'a'));
-    const ao = h('button', { class: 'btn sec', onclick: () => { Media.setAudioOnly(Media.camOn); this.syncBtns(); ao.textContent = Media.camOn ? 'Включить режим «Только аудио»' : 'Выключить режим «Только аудио»'; } }, icon('audio'), Media.camOn ? 'Включить режим «Только аудио»' : 'Выключить режим «Только аудио»');
-    const fs = h('button', { class: 'btn sec', onclick: () => { s.close(); this.fullscreen(); } }, icon('full'), 'Полный экран');
-    const big = h('button', { class: 'btn sec', onclick: () => { Ui.big(); Header.update(); s.close(); } }, icon('text'), Ui.isBig() ? 'Обычный вид' : 'Крупно и контрастно');
-    const sp = State.v.role === 'doctor' ? h('button', { class: 'btn sec', onclick: () => { s.close(); Speech.request(); } }, icon('audio'), Speech.on ? 'Остановить расшифровку речи' : 'Включить расшифровку речи') : null;
+    s.el.append(mk(T('Камера'), d.v, 'v'), mk(T('Микрофон'), d.a, 'a'));
+    const ao = h('button', { class: 'btn sec', onclick: () => { Media.setAudioOnly(Media.camOn); this.syncBtns(); ao.textContent = Media.camOn ? T('Включить режим «Только аудио»') : T('Выключить режим «Только аудио»'); } }, icon('audio'), Media.camOn ? T('Включить режим «Только аудио»') : T('Выключить режим «Только аудио»'));
+    const fs = h('button', { class: 'btn sec', onclick: () => { s.close(); this.fullscreen(); } }, icon('full'), T('Полный экран'));
+    const big = h('button', { class: 'btn sec', onclick: () => { Ui.big(); Header.update(); s.close(); } }, icon('text'), Ui.isBig() ? T('Обычный вид') : T('Крупно и контрастно'));
+    const sp = State.v.role === 'doctor' ? h('button', { class: 'btn sec', onclick: () => { s.close(); Speech.request(); } }, icon('audio'), Speech.on ? T('Остановить расшифровку речи') : T('Включить расшифровку речи')) : null;
     s.el.append(h('div', { class: 'stack' }, ao, fs, big, sp));
   },
   fullscreen() {
     const el = this.r.wrap; if (!el) return;
     if (document.fullscreenElement) { document.exitFullscreen(); return; }
-    const f = el.requestFullscreen || el.webkitRequestFullscreen; if (f) { const p = f.call(el); if (p && p.catch) p.catch(() => Toast.show('Полный экран недоступен')); } else Toast.show('Полный экран недоступен в этом браузере');
+    const f = el.requestFullscreen || el.webkitRequestFullscreen; if (f) { const p = f.call(el); if (p && p.catch) p.catch(() => Toast.show(T('Полный экран недоступен'))); } else Toast.show(T('Полный экран недоступен в этом браузере'));
   },
   makeDraggable(el, box) {
     let sx = 0, sy = 0, ox = 0, oy = 0, drag = false;
@@ -3307,13 +4163,13 @@ const Events = {
   presence(d) {
     const doc = State.v.role === 'doctor';
     if (d.state === 'waiting') { const was = State.v.peerHere; if (doc) this.patientWaiting(was); else State.set({ peerHere: true }); }
-    else if (d.state === 'online') { State.set({ peerHere: true }); if (doc && State.v.status === 'in_progress' && !(Rtc.pc && State.v.rtc === 'connected')) { Rtc.hardRestart(); Toast.show('Пациент подключился заново'); } }
+    else if (d.state === 'online') { State.set({ peerHere: true }); if (doc && State.v.status === 'in_progress' && !(Rtc.pc && State.v.rtc === 'connected')) { Rtc.hardRestart(); Toast.show(T('Пациент подключился заново')); } }
     else if (d.state === 'left') { CallUi.peerLeft(); }
   },
   patientWaiting(silent) {
     const first = !State.v.peerHere;
     State.set({ peerHere: true, status: State.v.status === 'in_progress' ? 'in_progress' : 'waiting' });
-    if (!silent && first) { Ui.sound(); Toast.show('Пациент ожидает в комнате', null, 6000); }
+    if (!silent && first) { Ui.sound(); Toast.show(T('Пациент ожидает в комнате'), null, 6000); }
   },
   control(d) {
     const doc = State.v.role === 'doctor';
@@ -3341,11 +4197,11 @@ const Chat = {
   seen: new Set(), list: null, input: null,
   build() {
     this.seen = new Set();
-    this.list = h('div', { class: 'msgs', role: 'log', 'aria-live': 'polite', 'aria-label': 'Сообщения' });
-    this.input = h('textarea', { class: 'inp', rows: 1, placeholder: 'Сообщение', 'aria-label': 'Текст сообщения', style: 'min-height:44px;height:44px;resize:none' });
+    this.list = h('div', { class: 'msgs', role: 'log', 'aria-live': 'polite', 'aria-label': T('Сообщения') });
+    this.input = h('textarea', { class: 'inp', rows: 1, placeholder: T('Сообщение'), 'aria-label': T('Текст сообщения'), style: 'min-height:44px;height:44px;resize:none' });
     this.input.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); this.send(); } });
     return h('div', { class: 'stack', style: 'flex:1;min-height:0' }, this.list,
-      h('div', { class: 'sheetrow' }, this.input, h('button', { class: 'ibtn', style: 'background:var(--acc);color:var(--onacc)', 'aria-label': 'Отправить', onclick: () => this.send() }, icon('send'))));
+      h('div', { class: 'sheetrow' }, this.input, h('button', { class: 'ibtn', style: 'background:var(--acc);color:var(--onacc)', 'aria-label': T('Отправить'), onclick: () => this.send() }, icon('send'))));
   },
   async send() {
     const text = this.input.value.trim(); if (!text) return;
@@ -3357,7 +4213,7 @@ const Chat = {
     const mine = ev.from === State.v.role;
     const m = h('div', { class: 'msg' + (mine ? ' me' : '') }, body, h('span', { class: 'tm', text: fmtTime(ev.ts) }));
     this.list.append(m); this.focusEnd();
-    if (!mine && CallUi.curTab !== 'chat' && State.v.view === 'call') Toast.show('Новое сообщение');
+    if (!mine && CallUi.curTab !== 'chat' && State.v.view === 'call') Toast.show(T('Новое сообщение'));
     return m;
   },
   focusEnd() { if (this.list) this.list.scrollTop = this.list.scrollHeight; },
@@ -3368,8 +4224,8 @@ const Chat = {
   addFile(ev, node) { this.push(ev, node); },
   addDoc(ev) {
     const d = ev.data || {}; const k = 'd' + d.mid; if (this.seen.has(k)) return; this.seen.add(k);
-    this.push(ev, h('div', { class: 'stack', style: 'gap:6px' }, h('strong', { text: 'Заключение консультации' }), h('span', { class: 'sm', text: d.doctor ? 'Врач: ' + d.doctor : '' }),
-      h('div', { class: 'row wrap' }, h('button', { class: 'btn sec', onclick: () => Print.conclusion(d) }, icon('doc'), 'Открыть и распечатать'),
+    this.push(ev, h('div', { class: 'stack', style: 'gap:6px' }, h('strong', { text: T('Заключение консультации') }), h('span', { class: 'sm', text: d.doctor ? T('Врач: ') + d.doctor : '' }),
+      h('div', { class: 'row wrap' }, h('button', { class: 'btn sec', onclick: () => Print.conclusion(d) }, icon('doc'), T('Открыть и распечатать')),
         h('button', { class: 'btn sec', onclick: () => Ui.download('zaklyuchenie.json', JSON.stringify(d, null, 2)) }, icon('download'), 'JSON'))));
     Files.addDocRow(ev);
   }
@@ -3384,8 +4240,8 @@ const Files = {
     const inp = h('input', { type: 'file', class: 'hidden', accept: EXT_OK.join(','), onchange: () => { for (const f of inp.files) this.upload(f); inp.value = ''; } });
     this.box = h('div', { class: 'list' });
     const drop = h('div', { class: 'stack', style: 'flex:1;min-height:0;overflow:auto' },
-      h('button', { class: 'btn sec', onclick: () => inp.click() }, icon('upload'), 'Прикрепить файл'),
-      h('p', { class: 'note', style: 'margin:0', text: 'PDF, JPEG, PNG, CSV, XLSX, XLS, до 20 МБ.' }), inp, this.box);
+      h('button', { class: 'btn sec', onclick: () => inp.click() }, icon('upload'), T('Прикрепить файл')),
+      h('p', { class: 'note', style: 'margin:0', text: T('PDF, JPEG, PNG, CSV, XLSX, XLS, до 20 МБ.') }), inp, this.box);
     drop.addEventListener('dragover', e => e.preventDefault());
     drop.addEventListener('drop', e => { e.preventDefault(); for (const f of e.dataTransfer.files) this.upload(f); });
     return drop;
@@ -3393,30 +4249,30 @@ const Files = {
   history() { /* история файлов и снимков для левой панели строится в Record.cardPane */ },
   upload(file) {
     const ext = (file.name.match(/\.[^.]+$/) || [''])[0].toLowerCase();
-    if (!EXT_OK.includes(ext)) { Toast.err('Недопустимый тип файла. Разрешены: PDF, JPEG, PNG, CSV, XLSX, XLS'); return; }
-    if (file.size > 20 * 1024 * 1024) { Toast.err('Файл больше 20 МБ'); return; }
-    if (file.size === 0) { Toast.err('Файл пустой'); return; }
+    if (!EXT_OK.includes(ext)) { Toast.err(T('Недопустимый тип файла. Разрешены: PDF, JPEG, PNG, CSV, XLSX, XLS')); return; }
+    if (file.size > 20 * 1024 * 1024) { Toast.err(T('Файл больше 20 МБ')); return; }
+    if (file.size === 0) { Toast.err(T('Файл пустой')); return; }
     const prog = h('progress', { max: 100, value: 0, style: 'width:100%' });
     const row = h('div', { class: 'li' }, icon('upload'), h('div', { class: 'grow' }, h('div', { class: 't', text: file.name }), prog));
     this.box.prepend(row);
     const fr = new FileReader();
-    fr.onerror = () => { row.remove(); Toast.err('Не удалось прочитать файл'); };
+    fr.onerror = () => { row.remove(); Toast.err(T('Не удалось прочитать файл')); };
     fr.onload = () => {
       const b64 = String(fr.result).split(',')[1] || '';
       const x = new XMLHttpRequest();
       x.open('POST', '/rooms/' + Api.room + '/events');
       x.setRequestHeader('Content-Type', 'application/json'); x.setRequestHeader('Authorization', 'Bearer ' + Api.token);
       x.upload.onprogress = e => { if (e.lengthComputable) prog.value = e.loaded / e.total * 100; };
-      x.onerror = () => { row.remove(); Toast.err('Нет связи при отправке файла'); };
+      x.onerror = () => { row.remove(); Toast.err(T('Нет связи при отправке файла')); };
       x.onload = () => {
         row.remove();
-        if (x.status !== 202) { let m = 'Файл не принят'; try { m = JSON.parse(x.responseText).message || m; } catch (e) { /* ignore */ } Toast.err(m); }
+        if (x.status !== 202) { let m = T('Файл не принят'); try { m = JSON.parse(x.responseText).message || m; } catch (e) { /* ignore */ } Toast.err(m); }
       };
       x.send(JSON.stringify({ type: 'file', data: { name: file.name, b64 } }));
     };
     fr.readAsDataURL(file);
   },
-  sizeText(n) { return n > 1048576 ? (n / 1048576).toFixed(1) + ' МБ' : Math.max(1, Math.round(n / 1024)) + ' КБ'; },
+  sizeText(n) { return n > 1048576 ? (n / 1048576).toFixed(1) + T(' МБ') : Math.max(1, Math.round(n / 1024)) + T(' КБ'); },
   async download(m) {
     try {
       const b = await Api.req('GET', '/rooms/' + Api.room + '/files/' + m.id, { blob: true });
@@ -3425,20 +4281,20 @@ const Files = {
   },
   add(ev) {
     const m = ev.data || {}; if (this.seen.has('f' + m.id)) return; this.seen.add('f' + m.id);
-    const dl = h('button', { class: 'ibtn', 'aria-label': 'Скачать ' + m.name, onclick: () => this.download(m) }, icon('download'));
+    const dl = h('button', { class: 'ibtn', 'aria-label': T('Скачать ') + m.name, onclick: () => this.download(m) }, icon('download'));
     if (this.box) this.box.prepend(h('div', { class: 'li' }, icon('file'), h('div', { class: 'grow' }, h('div', { class: 't', text: m.name }), h('div', { class: 'sm mut', text: this.sizeText(m.size) + ', ' + fmtTime(ev.ts) })), dl));
     const chatNode = h('div', { class: 'stack', style: 'gap:4px' }, h('div', { class: 'row' }, icon('file'), h('span', { text: m.name })), h('span', { class: 'sm', text: this.sizeText(m.size) }),
-      h('button', { class: 'btn sec', onclick: () => this.download(m) }, icon('download'), 'Скачать'));
+      h('button', { class: 'btn sec', onclick: () => this.download(m) }, icon('download'), T('Скачать')));
     if (/^image\//.test(m.mime || '')) {
-      const img = h('img', { class: 'pv', alt: 'Предпросмотр: ' + m.name }); chatNode.append(img);
+      const img = h('img', { class: 'pv', alt: T('Предпросмотр: ') + m.name }); chatNode.append(img);
       Api.req('GET', '/rooms/' + Api.room + '/files/' + m.id, { blob: true }).then(b => { img.src = URL.createObjectURL(b); }).catch(() => img.remove());
     }
     Chat.addFile(ev, chatNode);
   },
   addDocRow(ev) {
     const d = ev.data || {}; if (!this.box) return;
-    this.box.prepend(h('div', { class: 'li' }, icon('doc'), h('div', { class: 'grow' }, h('div', { class: 't', text: 'Заключение консультации' }), h('div', { class: 'sm mut', text: fmtTime(ev.ts) })),
-      h('button', { class: 'ibtn', 'aria-label': 'Открыть заключение', onclick: () => Print.conclusion(d) }, icon('doc'))));
+    this.box.prepend(h('div', { class: 'li' }, icon('doc'), h('div', { class: 'grow' }, h('div', { class: 't', text: T('Заключение консультации') }), h('div', { class: 'sm mut', text: fmtTime(ev.ts) })),
+      h('button', { class: 'ibtn', 'aria-label': T('Открыть заключение'), onclick: () => Print.conclusion(d) }, icon('doc'))));
   }
 };
 
@@ -3465,27 +4321,27 @@ const Print = {
   },
   conclusionLocal(d) {
     const c = d.conclusion || {}, row = (t, v) => [h('h2', { text: t }), h('p', { style: 'white-space:pre-wrap', text: v || '-' })];
-    this.go(h('div', null, h('h1', { text: d.center || Cfg.center }), h('h2', { text: 'Заключение консультации' }),
-      h('table', null, h('tr', null, h('th', { text: 'Пациент' }), h('td', { text: d.patient || '' })), h('tr', null, h('th', { text: 'Дата' }), h('td', { text: d.date || '' })), h('tr', null, h('th', { text: 'Врач' }), h('td', { text: d.doctor || '' }))),
-      row('Жалобы', c.complaints), row('Анамнез', c.anamnesis), row('Диагноз', c.diagnosis), row('Код МКБ-10', c.icd), row('Рекомендации', c.recommendations),
-      row('Повторный контакт', c.followup),
-      h('p', { class: 'sm', text: 'Документ сформирован по результатам дистанционной консультации. Это заключение консультации, а не электронный рецепт.' }),
-      h('div', { class: 'sign', text: 'Подпись врача ______________________ / ' + (d.doctor || '') + ' /' })));
+    this.go(h('div', null, h('h1', { text: T(d.center) || Cfg.center }), h('h2', { text: T('Заключение консультации') }),
+      h('table', null, h('tr', null, h('th', { text: T('Пациент') }), h('td', { text: d.patient || '' })), h('tr', null, h('th', { text: T('Дата') }), h('td', { text: d.date || '' })), h('tr', null, h('th', { text: T('Врач') }), h('td', { text: d.doctor || '' }))),
+      row(T('Жалобы'), c.complaints), row(T('Анамнез'), c.anamnesis), row(T('Диагноз'), c.diagnosis), row(T('Код МКБ-10'), c.icd), row(T('Рекомендации'), c.recommendations),
+      row(T('Повторный контакт'), c.followup),
+      h('p', { class: 'sm', text: T('Документ сформирован по результатам дистанционной консультации. Это заключение консультации, а не электронный рецепт.') }),
+      h('div', { class: 'sign', text: T('Подпись врача ______________________ / ') + (d.doctor || '') + ' /' })));
   }
 };
 
 /* ===== Карточка, заметки, заключение (врач) ===== */
 const ICD = [
-  ['A09', 'Инфекционный гастроэнтерит и колит'], ['B34.9', 'Вирусная инфекция неуточнённая'], ['E03.9', 'Гипотиреоз неуточнённый'], ['E11.9', 'Сахарный диабет 2 типа без осложнений'],
-  ['E66.9', 'Ожирение неуточнённое'], ['E78.5', 'Гиперлипидемия неуточнённая'], ['F32.9', 'Депрессивный эпизод неуточнённый'], ['F41.2', 'Смешанное тревожное и депрессивное расстройство'],
-  ['G43.9', 'Мигрень неуточнённая'], ['G47.0', 'Нарушения засыпания и поддержания сна'], ['I10', 'Эссенциальная гипертензия'], ['I20.9', 'Стенокардия неуточнённая'],
-  ['I25.1', 'Атеросклеротическая болезнь сердца'], ['I50.9', 'Сердечная недостаточность неуточнённая'], ['I83.9', 'Варикозное расширение вен нижних конечностей'],
-  ['J00', 'Острый назофарингит'], ['J02.9', 'Острый фарингит неуточнённый'], ['J03.9', 'Острый тонзиллит неуточнённый'], ['J06.9', 'Острая инфекция верхних дыхательных путей'],
-  ['J18.9', 'Пневмония неуточнённая'], ['J20.9', 'Острый бронхит неуточнённый'], ['J30.4', 'Аллергический ринит неуточнённый'], ['J45.9', 'Астма неуточнённая'],
-  ['K21.9', 'Гастроэзофагеальный рефлюкс без эзофагита'], ['K29.7', 'Гастрит неуточнённый'], ['K58.9', 'Синдром раздражённого кишечника'], ['K80.2', 'Камни жёлчного пузыря без холецистита'],
-  ['L20.9', 'Атопический дерматит неуточнённый'], ['L70.0', 'Угри обыкновенные'], ['L81.9', 'Нарушение пигментации неуточнённое'], ['L90.5', 'Рубцовые состояния и фиброз кожи'],
-  ['M25.5', 'Боль в суставе'], ['M54.2', 'Боль в области шеи'], ['M54.5', 'Боль внизу спины'], ['N39.0', 'Инфекция мочевыводящих путей'], ['N95.1', 'Менопауза'],
-  ['R50.9', 'Лихорадка неуточнённая'], ['R51', 'Головная боль'], ['Z09', 'Последующее наблюдение после лечения'], ['Z71.9', 'Консультирование неуточнённое']
+  ['A09', T('Инфекционный гастроэнтерит и колит')], ['B34.9', T('Вирусная инфекция неуточнённая')], ['E03.9', T('Гипотиреоз неуточнённый')], ['E11.9', T('Сахарный диабет 2 типа без осложнений')],
+  ['E66.9', T('Ожирение неуточнённое')], ['E78.5', T('Гиперлипидемия неуточнённая')], ['F32.9', T('Депрессивный эпизод неуточнённый')], ['F41.2', T('Смешанное тревожное и депрессивное расстройство')],
+  ['G43.9', T('Мигрень неуточнённая')], ['G47.0', T('Нарушения засыпания и поддержания сна')], ['I10', T('Эссенциальная гипертензия')], ['I20.9', T('Стенокардия неуточнённая')],
+  ['I25.1', T('Атеросклеротическая болезнь сердца')], ['I50.9', T('Сердечная недостаточность неуточнённая')], ['I83.9', T('Варикозное расширение вен нижних конечностей')],
+  ['J00', T('Острый назофарингит')], ['J02.9', T('Острый фарингит неуточнённый')], ['J03.9', T('Острый тонзиллит неуточнённый')], ['J06.9', T('Острая инфекция верхних дыхательных путей')],
+  ['J18.9', T('Пневмония неуточнённая')], ['J20.9', T('Острый бронхит неуточнённый')], ['J30.4', T('Аллергический ринит неуточнённый')], ['J45.9', T('Астма неуточнённая')],
+  ['K21.9', T('Гастроэзофагеальный рефлюкс без эзофагита')], ['K29.7', T('Гастрит неуточнённый')], ['K58.9', T('Синдром раздражённого кишечника')], ['K80.2', T('Камни жёлчного пузыря без холецистита')],
+  ['L20.9', T('Атопический дерматит неуточнённый')], ['L70.0', T('Угри обыкновенные')], ['L81.9', T('Нарушение пигментации неуточнённое')], ['L90.5', T('Рубцовые состояния и фиброз кожи')],
+  ['M25.5', T('Боль в суставе')], ['M54.2', T('Боль в области шеи')], ['M54.5', T('Боль внизу спины')], ['N39.0', T('Инфекция мочевыводящих путей')], ['N95.1', T('Менопауза')],
+  ['R50.9', T('Лихорадка неуточнённая')], ['R51', T('Головная боль')], ['Z09', T('Последующее наблюдение после лечения')], ['Z71.9', T('Консультирование неуточнённое')]
 ];
 const ICD_RE = /^[A-Z]\d{2}(\.\d{1,2})?$/;
 const Record = {
@@ -3493,23 +4349,23 @@ const Record = {
   deb(k, fn, ms) { clearTimeout(this.timers[k]); this.timers[k] = setTimeout(fn, ms || 800); },
   cardPane() {
     const mk = (key, label, el) => { this.f[key] = el; el.addEventListener('input', () => this.deb('card', () => this.saveCard())); return Ui.field(label, el); };
-    const sel = (opts) => { const s = h('select', { class: 'inp' }); for (const o of opts) s.append(h('option', { value: o, text: o || 'Не указано' })); return s; };
-    this.loc = { address: Ui.input('text', 'Город, улица, дом, квартира'), phone: Ui.input('tel', '+7 ...') };
+    const sel = (opts) => { const s = h('select', { class: 'inp' }); for (const o of opts) s.append(h('option', { value: o, text: o || T('Не указано') })); return s; };
+    this.loc = { address: Ui.input('text', T('Город, улица, дом, квартира')), phone: Ui.input('tel', '+7 ...') };
     for (const k in this.loc) this.loc[k].addEventListener('input', () => this.deb('loc', () => this.saveLocation().catch(() => { })));
-    this.notes = h('textarea', { class: 'inp', placeholder: 'Видны только врачу', rows: 4 });
+    this.notes = h('textarea', { class: 'inp', placeholder: T('Видны только врачу'), rows: 4 });
     this.notes.addEventListener('input', () => this.deb('notes', () => Api.post('/rooms/' + Api.room + '/protocol', { notes: this.notes.value }).catch(Toast.err)));
     const hist = Files.hist = h('div', { class: 'stack' });
     return h('div', { class: 'stack' },
-      h('div', { class: 'rowb' }, h('h3', { text: 'Пациент' }), h('span', { class: 'chip', text: 'со слов пациента' })),
-      mk('full_name', 'ФИО', Ui.input('text')), mk('birth', 'Дата рождения', Ui.input('date')),
-      mk('sex', 'Пол', sel(['', 'Женский', 'Мужской'])), mk('blood', 'Группа крови', sel(['', 'O(I) Rh+', 'O(I) Rh-', 'A(II) Rh+', 'A(II) Rh-', 'B(III) Rh+', 'B(III) Rh-', 'AB(IV) Rh+', 'AB(IV) Rh-'])),
-      mk('allergies', 'Аллергии', h('textarea', { class: 'inp', rows: 2 })), mk('chronic', 'Хронические заболевания', h('textarea', { class: 'inp', rows: 2 })),
-      mk('meds', 'Принимаемые препараты', h('textarea', { class: 'inp', rows: 2 })), mk('complaints', 'Жалобы', h('textarea', { class: 'inp', rows: 3 })),
-      h('h3', { text: 'Местонахождение пациента' }),
-      Ui.field('Адрес (обязательно)', this.loc.address), Ui.field('Телефон (обязательно)', this.loc.phone),
-      h('div', { class: 'banner warn', style: 'border-radius:var(--r1)', text: 'Экстренные службы: 103 / 112' }),
-      h('h3', { text: 'Приватные заметки' }), this.notes,
-      h('p', { class: 'note', style: 'margin:0', text: 'Заметки и карточка пациенту не передаются.' }), hist);
+      h('div', { class: 'rowb' }, h('h3', { text: T('Пациент') }), h('span', { class: 'chip', text: T('со слов пациента') })),
+      mk('full_name', T('ФИО'), Ui.input('text')), mk('birth', T('Дата рождения'), Ui.input('date')),
+      mk('sex', T('Пол'), sel(['', T('Женский'), T('Мужской')])), mk('blood', T('Группа крови'), sel(['', 'O(I) Rh+', 'O(I) Rh-', 'A(II) Rh+', 'A(II) Rh-', 'B(III) Rh+', 'B(III) Rh-', 'AB(IV) Rh+', 'AB(IV) Rh-'])),
+      mk('allergies', T('Аллергии'), h('textarea', { class: 'inp', rows: 2 })), mk('chronic', T('Хронические заболевания'), h('textarea', { class: 'inp', rows: 2 })),
+      mk('meds', T('Принимаемые препараты'), h('textarea', { class: 'inp', rows: 2 })), mk('complaints', T('Жалобы'), h('textarea', { class: 'inp', rows: 3 })),
+      h('h3', { text: T('Местонахождение пациента') }),
+      Ui.field(T('Адрес (обязательно)'), this.loc.address), Ui.field(T('Телефон (обязательно)'), this.loc.phone),
+      h('div', { class: 'banner warn', style: 'border-radius:var(--r1)', text: T('Экстренные службы: 103 / 112') }),
+      h('h3', { text: T('Приватные заметки') }), this.notes,
+      h('p', { class: 'note', style: 'margin:0', text: T('Заметки и карточка пациенту не передаются.') }), hist);
   },
   load(p) {
     const c = p.card || {};
@@ -3527,31 +4383,31 @@ const Record = {
   async saveCard() { try { await Api.ev('ehr', { card: this.collectCard() }); } catch (e) { Toast.err(e); } },
   conclPane() {
     const mk = (k, label, el) => { this.c[k] = el; return Ui.field(label, el); };
-    const icd = Ui.input('text', 'Например J06.9'); icd.setAttribute('list', 'icdlist'); icd.maxLength = 6; icd.style.textTransform = 'uppercase';
+    const icd = Ui.input('text', T('Например J06.9')); icd.setAttribute('list', 'icdlist'); icd.maxLength = 6; icd.style.textTransform = 'uppercase';
     const dl = h('datalist', { id: 'icdlist' }, ICD.map(([c, n]) => h('option', { value: c, label: n })));
     const hintEl = h('div', { class: 'note', 'aria-live': 'polite', text: '' });
     icd.addEventListener('input', () => {
       const v = icd.value.toUpperCase().trim(); const f = ICD.find(x => x[0] === v);
-      hintEl.textContent = !v ? '' : f ? f[1] : (ICD_RE.test(v) ? 'Код корректного формата' : 'Формат кода: A00 или A00.0');
+      hintEl.textContent = !v ? '' : f ? f[1] : (ICD_RE.test(v) ? T('Код корректного формата') : T('Формат кода: A00 или A00.0'));
       icd.setAttribute('aria-invalid', String(!!v && !ICD_RE.test(v)));
     });
     this.c.icd = icd;
-    return h('div', { class: 'stack' }, h('h3', { text: 'Заключение консультации' }),
-      mk('complaints', 'Жалобы', h('textarea', { class: 'inp', rows: 3 })), mk('anamnesis', 'Анамнез', h('textarea', { class: 'inp', rows: 3 })),
-      mk('diagnosis', 'Диагноз', h('textarea', { class: 'inp', rows: 2 })), Ui.field('Код МКБ-10', icd), dl, hintEl,
-      mk('recommendations', 'Рекомендации', h('textarea', { class: 'inp', rows: 4 })), mk('followup', 'Дата повторного контакта', Ui.input('date')),
-      h('div', { class: 'row wrap' }, h('button', { class: 'btn pri', onclick: () => this.saveConcl() }, 'Сохранить'),
-        h('button', { class: 'btn sec', onclick: () => this.printConcl() }, icon('doc'), 'Печать'),
-        h('button', { class: 'btn sec', onclick: () => this.sendConcl() }, icon('send'), 'Отправить пациенту'),
-        h('button', { class: 'btn sec', onclick: () => this.exportJson() }, icon('download'), 'JSON для МИС')),
-      h('p', { class: 'note', style: 'margin:0', text: 'Это заключение консультации, а не электронный рецепт.' }));
+    return h('div', { class: 'stack' }, h('h3', { text: T('Заключение консультации') }),
+      mk('complaints', T('Жалобы'), h('textarea', { class: 'inp', rows: 3 })), mk('anamnesis', T('Анамнез'), h('textarea', { class: 'inp', rows: 3 })),
+      mk('diagnosis', T('Диагноз'), h('textarea', { class: 'inp', rows: 2 })), Ui.field(T('Код МКБ-10'), icd), dl, hintEl,
+      mk('recommendations', T('Рекомендации'), h('textarea', { class: 'inp', rows: 4 })), mk('followup', T('Дата повторного контакта'), Ui.input('date')),
+      h('div', { class: 'row wrap' }, h('button', { class: 'btn pri', onclick: () => this.saveConcl() }, T('Сохранить')),
+        h('button', { class: 'btn sec', onclick: () => this.printConcl() }, icon('doc'), T('Печать')),
+        h('button', { class: 'btn sec', onclick: () => this.sendConcl() }, icon('send'), T('Отправить пациенту')),
+        h('button', { class: 'btn sec', onclick: () => this.exportJson() }, icon('download'), T('JSON для МИС'))),
+      h('p', { class: 'note', style: 'margin:0', text: T('Это заключение консультации, а не электронный рецепт.') }));
   },
   fillConcl(c) { for (const k of ['complaints', 'anamnesis', 'diagnosis', 'icd', 'recommendations', 'followup']) if (this.c[k]) this.c[k].value = c[k] || ''; },
   collectConcl() { const o = {}; for (const k of ['complaints', 'anamnesis', 'diagnosis', 'icd', 'recommendations', 'followup']) o[k] = (this.c[k].value || '').trim(); o.icd = o.icd.toUpperCase(); return o; },
   async saveConcl() {
     const c = this.collectConcl();
-    if (c.icd && !ICD_RE.test(c.icd)) { Toast.err('Код МКБ-10 должен иметь вид A00 или A00.0'); this.c.icd.focus(); return false; }
-    try { await Api.post('/rooms/' + Api.room + '/protocol', { conclusion: c }); this.lastConcl = c; Toast.show('Заключение сохранено'); return true; }
+    if (c.icd && !ICD_RE.test(c.icd)) { Toast.err(T('Код МКБ-10 должен иметь вид A00 или A00.0')); this.c.icd.focus(); return false; }
+    try { await Api.post('/rooms/' + Api.room + '/protocol', { conclusion: c }); this.lastConcl = c; Toast.show(T('Заключение сохранено')); return true; }
     catch (e) { Toast.err(e); return false; }
   },
   payload() {
@@ -3561,7 +4417,7 @@ const Record = {
   printConcl() { Print.conclusion(this.payload()); },
   async sendConcl() {
     if (!(await this.saveConcl())) return;
-    try { await Api.ev('document', {}); Toast.show('Заключение отправлено пациенту'); } catch (e) { Toast.err(e); }
+    try { await Api.ev('document', {}); Toast.show(T('Заключение отправлено пациенту')); } catch (e) { Toast.err(e); }
   },
   exportJson() {
     const p = this.payload(); const a = App.proto.appointment || {};
@@ -3574,7 +4430,7 @@ const App = {
   proto: {}, dead: false, banner: null,
   shell() {
     Header.el = h('header', { class: 'top' });
-    this.banner = h('div', { class: 'banner bad hidden', role: 'alert', text: 'Нет связи с сервером. Пробую восстановить подключение.' });
+    this.banner = h('div', { class: 'banner bad hidden', role: 'alert', text: T('Нет связи с сервером. Пробую восстановить подключение.') });
     $('#app').replaceChildren(Header.el, this.banner, h('main', { id: 'main' }));
     Header.update(); Services.start();
   },
@@ -3584,7 +4440,7 @@ const App = {
     window.addEventListener('online', () => this.setOffline(false));
     window.addEventListener('offline', () => this.setOffline(true));
     window.addEventListener('pagehide', () => { if (State.v.view === 'call' && !this.dead) Api.bye(); });
-    window.addEventListener('unhandledrejection', e => { e.preventDefault(); console.error(e.reason); if (e.reason && e.reason.name !== 'AbortError') Toast.err(e.reason instanceof ApiErr ? e.reason.message : 'Не удалось выполнить действие'); });
+    window.addEventListener('unhandledrejection', e => { e.preventDefault(); console.error(e.reason); if (e.reason && e.reason.name !== 'AbortError') Toast.err(e.reason instanceof ApiErr ? e.reason.message : T('Не удалось выполнить действие')); });
     document.addEventListener('keydown', e => this.key(e));
     try {
       const hl = await Api.get('/health', { token: false });
@@ -3595,7 +4451,7 @@ const App = {
       if (code) { Session.start(code); return; }
       if (doc) this.afterLogin(); else Auth.showLogin();
     } catch (e) {
-      $('#main').replaceChildren(h('div', { class: 'center-col' }, h('h2', { text: 'Сервер недоступен' }), h('p', { class: 'mut', text: e.message }), h('button', { class: 'btn pri', onclick: () => location.reload() }, 'Повторить')));
+      $('#main').replaceChildren(h('div', { class: 'center-col' }, h('h2', { text: T('Сервер недоступен') }), h('p', { class: 'mut', text: e.message }), h('button', { class: 'btn pri', onclick: () => location.reload() }, T('Повторить'))));
     }
   },
   afterLogin() {
@@ -3626,7 +4482,7 @@ const App = {
     Header.update();
   },
   async emergency() {
-    if (!(await Ui.confirm('Экстренное завершение', 'Консультация будет немедленно прервана у обоих участников, комната закроется. Продолжить?', 'Завершить немедленно', true))) return;
+    if (!(await Ui.confirm(T('Экстренное завершение'), T('Консультация будет немедленно прервана у обоих участников, комната закроется. Продолжить?'), T('Завершить немедленно'), true))) return;
     try { await Api.ev('kill', {}); } catch (e) { if (!(e instanceof ApiErr && e.status === 410)) { Toast.err(e); return; } }
     this.killed();
   },
@@ -3640,25 +4496,25 @@ const App = {
     $('#printArea').replaceChildren();
     State.set({ view: 'killed', rtc: 'closed', status: 'completed', peerHere: false });
     Header.update();
-    $('#main').replaceChildren(h('div', { class: 'center-col' }, h('h1', { text: 'Консультация прервана' }),
-      h('p', { class: 'mut', text: doc ? 'Комната закрыта у обоих участников. Данные на экране очищены.' : 'Врач завершил сеанс. Данные на экране очищены.' }),
-      doc ? h('button', { class: 'btn pri lg', onclick: () => { this.dead = false; history.replaceState(null, '', location.pathname); Appointments.show(); } }, 'К списку приёмов') : null));
+    $('#main').replaceChildren(h('div', { class: 'center-col' }, h('h1', { text: T('Консультация прервана') }),
+      h('p', { class: 'mut', text: doc ? T('Комната закрыта у обоих участников. Данные на экране очищены.') : T('Врач завершил сеанс. Данные на экране очищены.') }),
+      doc ? h('button', { class: 'btn pri lg', onclick: () => { this.dead = false; history.replaceState(null, '', location.pathname); Appointments.show(); } }, T('К списку приёмов')) : null));
   },
   roomGone(e) {
     if (this.dead) return;
     if (e && e.status === 410) { this.killed(); return; }
     Poller.stop(); clearInterval(Session.hb); Speech.stop(); Rtc.close(); Quality.stop(); FaceMesh.stopAll(); Media.stop();
-    $('#main').replaceChildren(h('div', { class: 'center-col' }, h('h2', { text: 'Сеанс недоступен' }),
-      h('p', { class: 'mut', text: 'Комната не найдена или доступ к ней потерян (возможно, сервер перезапущен).' }),
-      h('button', { class: 'btn pri', onclick: () => { try { sessionStorage.removeItem('mars_pt_' + Session.code); } catch (x) { /* ignore */ } location.reload(); } }, 'Начать заново')));
+    $('#main').replaceChildren(h('div', { class: 'center-col' }, h('h2', { text: T('Сеанс недоступен') }),
+      h('p', { class: 'mut', text: T('Комната не найдена или доступ к ней потерян (возможно, сервер перезапущен).') }),
+      h('button', { class: 'btn pri', onclick: () => { try { sessionStorage.removeItem('mars_pt_' + Session.code); } catch (x) { /* ignore */ } location.reload(); } }, T('Начать заново'))));
   },
   async auditSheet() {
-    const s = Ui.sheet({ title: 'Журнал аудита', wide: true });
+    const s = Ui.sheet({ title: T('Журнал аудита'), wide: true });
     s.el.append(h('div', { class: 'sk', style: 'height:80px' }));
     try {
       const r = await Api.get('/audit?limit=300');
       s.el.replaceChildren(h('div', { style: 'overflow:auto;max-height:60dvh' }, h('table', { class: 'tb' },
-        h('tr', null, ['Время', 'Участник', 'Действие', 'Комната', 'Деталь'].map(t => h('th', { text: t }))),
+        h('tr', null, [T('Время'), T('Участник'), T('Действие'), T('Комната'), T('Деталь')].map(t => h('th', { text: t }))),
         r.items.map(i => h('tr', null, h('td', { text: fmtDT(i.ts) }), h('td', { text: i.actor }), h('td', { text: i.action }), h('td', { class: 'mono', text: i.room }), h('td', { text: i.detail }))))));
     } catch (e) { s.el.replaceChildren(h('p', { text: e.message })); }
   }
@@ -3710,12 +4566,12 @@ FaceMesh.Remote = {
       job = await Api.get('/rooms/' + Api.room + '/jobs/' + job.id, { signal }).catch(e => { if (e && e.name === 'AbortError') throw e; return job; });
     }
     if (job.status === 'done') return Object.assign({}, job.result, { job_id: job.id });  /* по номеру задания сервер сохранит числа vision, а не браузера */
-    throw new Error((job.error && job.error.message) || 'Ошибка анализа');
+    throw new Error((job.error && job.error.message) || T('Ошибка анализа'));
   },
   async pick(kind, input, local, signal, downMsg) {
     const r = await this.run(kind, input, signal);
     if (r) { this.down = false; r.source = 'vision'; return r; }
-    if (!this.down) Toast.show(downMsg || 'Сервис анализа временно недоступен: расчёт выполнен на этом устройстве');
+    if (!this.down) Toast.show(downMsg || T('Сервис анализа временно недоступен: расчёт выполнен на этом устройстве'));
     this.down = true; local.source = 'device';
     return local;
   }
@@ -3726,7 +4582,7 @@ FaceMesh.Loader = {
   mod: null, fileset: null, conn: null,
   async load() {
     if (this.mod) return this.mod;
-    if (!Cfg.mediapipe) throw new Error('Файлы MediaPipe не найдены на сервере');
+    if (!Cfg.mediapipe) throw new Error(T('Файлы MediaPipe не найдены на сервере'));
     this.mod = await import('/vendor/vision_bundle.mjs');
     this.fileset = await this.mod.FilesetResolver.forVisionTasks('/vendor/wasm');
     this.conn = this.mod.FaceLandmarker.FACE_LANDMARKS_TESSELATION || null;
@@ -3739,7 +4595,7 @@ FaceMesh.Loader = {
       runningMode: running || 'VIDEO', numFaces: FACE_MAX, outputFaceBlendshapes: true, outputFacialTransformationMatrixes: true
     });
     try { return await mk('GPU'); }
-    catch (e) { console.warn('GPU недоступен, использую CPU', e); return await mk('CPU'); }
+    catch (e) { console.warn(T('GPU недоступен, использую CPU'), e); return await mk('CPU'); }
   }
 };
 
@@ -3781,7 +4637,7 @@ class FMTracker {
       this.errors = 0;
     } catch (e) {
       console.error('Face Mesh', e);
-      if (++this.errors > 5) { this.stop(); FaceMesh.fail('Модуль Face Mesh остановлен из-за ошибки обработки видео'); return; }
+      if (++this.errors > 5) { this.stop(); FaceMesh.fail(T('Модуль Face Mesh остановлен из-за ошибки обработки видео')); return; }
     }
     this.kick();
   }
@@ -3855,17 +4711,17 @@ FaceMesh.Pose = {
     if (!e) return null;
     const aMax = Math.max(Math.abs(e.yaw), Math.abs(e.pitch), Math.abs(e.roll));
     let hint = '', level = 'good';
-    if (aMax > tol * 2.5) { hint = 'Повернитесь к камере'; level = 'bad'; }
-    else if (g.size < 0.2) { hint = 'Подвиньтесь ближе'; level = 'bad'; }
-    else if (g.size < 0.3) { hint = 'Подвиньтесь ближе'; level = 'medium'; }
-    else if (g.size > 0.8) { hint = 'Отодвиньтесь от камеры'; level = 'medium'; }
-    else if (Math.abs(g.cx - 0.5) > 0.18 || Math.abs(g.cy - 0.5) > 0.18) { hint = 'Расположитесь по центру кадра'; level = 'medium'; }
-    else if (st && st.mean < 70) { hint = 'Добавьте света спереди'; level = 'medium'; }
-    else if (st && st.bg - st.mean > 45) { hint = 'Уберите свет за спиной'; level = 'medium'; }
-    else if (st && st.over > 0.08) { hint = 'Слишком яркий свет на лице'; level = 'medium'; }
-    else if (this.moving()) { hint = 'Держите голову неподвижно'; level = 'medium'; }
-    else if (st && st.sharp < 12) { hint = 'Изображение размыто, держите голову неподвижно'; level = 'medium'; }
-    else if (aMax > tol) { hint = 'Выровняйте голову'; level = 'medium'; }
+    if (aMax > tol * 2.5) { hint = T('Повернитесь к камере'); level = 'bad'; }
+    else if (g.size < 0.2) { hint = T('Подвиньтесь ближе'); level = 'bad'; }
+    else if (g.size < 0.3) { hint = T('Подвиньтесь ближе'); level = 'medium'; }
+    else if (g.size > 0.8) { hint = T('Отодвиньтесь от камеры'); level = 'medium'; }
+    else if (Math.abs(g.cx - 0.5) > 0.18 || Math.abs(g.cy - 0.5) > 0.18) { hint = T('Расположитесь по центру кадра'); level = 'medium'; }
+    else if (st && st.mean < 70) { hint = T('Добавьте света спереди'); level = 'medium'; }
+    else if (st && st.bg - st.mean > 45) { hint = T('Уберите свет за спиной'); level = 'medium'; }
+    else if (st && st.over > 0.08) { hint = T('Слишком яркий свет на лице'); level = 'medium'; }
+    else if (this.moving()) { hint = T('Держите голову неподвижно'); level = 'medium'; }
+    else if (st && st.sharp < 12) { hint = T('Изображение размыто, держите голову неподвижно'); level = 'medium'; }
+    else if (aMax > tol) { hint = T('Выровняйте голову'); level = 'medium'; }
     return Object.assign({ level, hint, tol, size: g.size, cx: g.cx, cy: g.cy, t: performance.now() }, e, st ? { mean: st.mean, over: st.over, sharp: st.sharp, bg: st.bg } : {});
   },
   inTol(e, tol) { return !!e && Math.abs(e.yaw) <= tol && Math.abs(e.pitch) <= tol && Math.abs(e.roll) <= tol; },
@@ -3965,8 +4821,8 @@ FaceMesh.Symmetry = {
     v.cR = -down(P[61]); v.cL = -down(P[291]); v.wR = -along(P[234]); v.wL = along(P[454]);
     return v;
   },
-  PAIRS: [['eo', 'Внешние уголки глаз: расстояние до средней линии', 'eoR', 'eoL'], ['ei', 'Внутренние уголки глаз: расстояние до средней линии', 'eiR', 'eiL'], ['mouth', 'Уголки рта: расстояние до средней линии', 'mR', 'mL'],
-    ['brow', 'Высота бровей над линией глаз', 'bR', 'bL'], ['mcor', 'Высота уголков рта относительно линии глаз', 'cR', 'cL'], ['half', 'Ширина половин лица', 'wR', 'wL']],
+  PAIRS: [['eo', T('Внешние уголки глаз: расстояние до средней линии'), 'eoR', 'eoL'], ['ei', T('Внутренние уголки глаз: расстояние до средней линии'), 'eiR', 'eiL'], ['mouth', T('Уголки рта: расстояние до средней линии'), 'mR', 'mL'],
+    ['brow', T('Высота бровей над линией глаз'), 'bR', 'bL'], ['mcor', T('Высота уголков рта относительно линии глаз'), 'cR', 'cL'], ['half', T('Ширина половин лица'), 'wR', 'wL']],
   build(samples, cal) {
     const med = k => median(samples.map(s => s[k])), ipdPx = med('ipd');
     const k = cal && cal.ipd_mm ? cal.ipd_mm : null;
@@ -3975,7 +4831,7 @@ FaceMesh.Symmetry = {
       if (k) { o.right_mm = r * k; o.left_mm = l * k; o.diff_mm = (r - l) * k; }
       return o;
     });
-    const singles = [{ id: 'tilt', label: 'Наклон линии глаз', value: med('tilt'), unit: 'deg' }, { id: 'nose', label: 'Смещение кончика носа от средней линии', value: med('nose'), unit: 'ipd' }, { id: 'chin', label: 'Смещение подбородка от средней линии', value: med('chin'), unit: 'ipd' }];
+    const singles = [{ id: 'tilt', label: T('Наклон линии глаз'), value: med('tilt'), unit: 'deg' }, { id: 'nose', label: T('Смещение кончика носа от средней линии'), value: med('nose'), unit: 'ipd' }, { id: 'chin', label: T('Смещение подбородка от средней линии'), value: med('chin'), unit: 'ipd' }];
     if (k) for (const s of singles) if (s.unit === 'ipd') s.value_mm = s.value * k;
     const out = { kind: 'symmetry', pose_ok: true, samples: samples.length, ipd_px: ipdPx, tolerance: FaceMesh.tol, rows, singles, ts: Math.floor(Date.now() / 1000) };
     if (k) out.calibration = cal;
@@ -3985,18 +4841,18 @@ FaceMesh.Symmetry = {
   run(onProgress, signal) {
     const F = FaceMesh, trk = F.trk, secs = 2.5, need = 12;
     return new Promise((res, rej) => {
-      if (!trk) return rej(new Error('Модуль не запущен'));
+      if (!trk) return rej(new Error(T('Модуль не запущен')));
       const S = [], FR = []; let t0 = 0, fail = null; const t00 = performance.now();
       const fn = cur => {
-        if (signal && signal.aborted) { done(new Error('Отменено')); return; }
+        if (signal && signal.aborted) { done(new Error(T('Отменено'))); return; }
         const e = F.Pose.euler(cur);
-        if (!F.Pose.inTol(e, F.tol) || cur.multi && false) { t0 = 0; S.length = 0; FR.length = 0; onProgress(0, 'Выровняйте голову: ' + (e ? 'yaw ' + e.yaw.toFixed(0) + ', pitch ' + e.pitch.toFixed(0) + ', roll ' + e.roll.toFixed(0) : '')); return; }
+        if (!F.Pose.inTol(e, F.tol) || cur.multi && false) { t0 = 0; S.length = 0; FR.length = 0; onProgress(0, T('Выровняйте голову: ') + (e ? 'yaw ' + e.yaw.toFixed(0) + ', pitch ' + e.pitch.toFixed(0) + ', roll ' + e.roll.toFixed(0) : '')); return; }
         if (!t0) t0 = performance.now();
         const v = this.one(cur); if (v) { S.push(v); FR.push(F.Remote.pack(cur, this.IDX, [])); }
-        const p = Math.min(1, (performance.now() - t0) / (secs * 1000)); onProgress(p, 'Держите позу');
+        const p = Math.min(1, (performance.now() - t0) / (secs * 1000)); onProgress(p, T('Держите позу'));
         if (p >= 1) { if (S.length >= need) done(null); else { t0 = 0; S.length = 0; FR.length = 0; } }
       };
-      const tm = setInterval(() => { if (performance.now() - t00 > 25000) done(new Error('Не удалось получить устойчивую позу в допуске за отведённое время')); else if (trk.lost()) { t0 = 0; S.length = 0; FR.length = 0; onProgress(0, 'Лицо не найдено'); } }, 400);
+      const tm = setInterval(() => { if (performance.now() - t00 > 25000) done(new Error(T('Не удалось получить устойчивую позу в допуске за отведённое время'))); else if (trk.lost()) { t0 = 0; S.length = 0; FR.length = 0; onProgress(0, T('Лицо не найдено')); } }, 400);
       /* кадры для сервиса vision: неперечисляемое поле, в протокол не попадает */
       const done = err => { clearInterval(tm); F.subs.delete(fn); if (err) return rej(err); const out = this.build(S, F.cal); Object.defineProperty(out, '_frames', { value: FR }); res(out); };
       F.subs.add(fn);
@@ -4007,25 +4863,25 @@ FaceMesh.Symmetry = {
 /* --- Mobility: подвижность по blendshapes --- */
 FaceMesh.Mobility = {
   TASKS: [
-    { id: 'smile', label: 'Улыбка', cmd: 'Широко улыбнитесь и держите улыбку', r: 'mouthSmileRight', l: 'mouthSmileLeft' },
-    { id: 'brow', label: 'Подъём бровей', cmd: 'Поднимите брови как можно выше', r: 'browOuterUpRight', l: 'browOuterUpLeft' },
-    { id: 'eye', label: 'Закрытие глаз', cmd: 'Крепко зажмурьте глаза', r: 'eyeBlinkRight', l: 'eyeBlinkLeft' },
-    { id: 'cheek', label: 'Надувание щёк', cmd: 'Надуйте щёки и держите', single: 'cheekPuff' },
-    { id: 'mouth', label: 'Открытие рта', cmd: 'Широко откройте рот', single: 'jawOpen' },
-    { id: 'lips', label: 'Поджатие губ', cmd: 'Плотно сожмите губы', r: 'mouthPressRight', l: 'mouthPressLeft' }
+    { id: 'smile', label: T('Улыбка'), cmd: T('Широко улыбнитесь и держите улыбку'), r: 'mouthSmileRight', l: 'mouthSmileLeft' },
+    { id: 'brow', label: T('Подъём бровей'), cmd: T('Поднимите брови как можно выше'), r: 'browOuterUpRight', l: 'browOuterUpLeft' },
+    { id: 'eye', label: T('Закрытие глаз'), cmd: T('Крепко зажмурьте глаза'), r: 'eyeBlinkRight', l: 'eyeBlinkLeft' },
+    { id: 'cheek', label: T('Надувание щёк'), cmd: T('Надуйте щёки и держите'), single: 'cheekPuff' },
+    { id: 'mouth', label: T('Открытие рта'), cmd: T('Широко откройте рот'), single: 'jawOpen' },
+    { id: 'lips', label: T('Поджатие губ'), cmd: T('Плотно сожмите губы'), r: 'mouthPressRight', l: 'mouthPressLeft' }
   ],
   val(cur, name) { if (!cur.bs) return 0; const c = cur.bs.find(x => x.categoryName === name); return c ? c.score : 0; },
   /* одно задание: максимум коэффициента за 4 с в кадрах с допустимой позой */
   runTask(task, onProgress, signal) {
     const F = FaceMesh, secs = 4, tol = Math.max(F.tol * 2, 10);
     return new Promise((res, rej) => {
-      if (!F.trk) return rej(new Error('Модуль не запущен'));
+      if (!F.trk) return rej(new Error(T('Модуль не запущен')));
       const t0 = performance.now(), FR = [], names = task.single ? [task.single] : [task.r, task.l]; let mr = 0, ml = 0, ms = 0, n = 0;
       const fn = cur => {
-        if (signal && signal.aborted) { fin(new Error('Отменено')); return; }
+        if (signal && signal.aborted) { fin(new Error(T('Отменено'))); return; }
         if (FR.length < 400) FR.push(F.Remote.pack(cur, [LM.REO, LM.LEO, LM.NOSE], names));
         const e = F.Pose.euler(cur);
-        if (!F.Pose.inTol(e, tol)) { onProgress((performance.now() - t0) / (secs * 1000), 'Смотрите в камеру'); return; }
+        if (!F.Pose.inTol(e, tol)) { onProgress((performance.now() - t0) / (secs * 1000), T('Смотрите в камеру')); return; }
         n++;
         if (task.single) ms = Math.max(ms, this.val(cur, task.single)); else { mr = Math.max(mr, this.val(cur, task.r)); ml = Math.max(ml, this.val(cur, task.l)); }
         onProgress((performance.now() - t0) / (secs * 1000), task.cmd);
@@ -4034,7 +4890,7 @@ FaceMesh.Mobility = {
       const fin = err => {
         clearInterval(tm); F.subs.delete(fn);
         if (err) return rej(err);
-        if (n < 10) return rej(new Error('Недостаточно кадров с лицом в допустимой позе. Повторите задание.'));
+        if (n < 10) return rej(new Error(T('Недостаточно кадров с лицом в допустимой позе. Повторите задание.')));
         const o = { id: task.id, label: task.label };
         if (task.single) o.single = ms; else { o.right = mr; o.left = ml; o.ratio = Math.max(mr, ml) > 0.05 ? Math.min(mr, ml) / Math.max(mr, ml) : null; }
         Object.defineProperty(o, '_frames', { value: FR });
@@ -4057,7 +4913,7 @@ FaceMesh.Calibrate = {
     const iris = median(samples.map(s => s.iris)), ipd = median(samples.map(s => s.ipd));
     if (!iris || !ipd) return null;
     const mmpp = this.IRIS_MM / iris;
-    return { source: 'iris', label: 'по радужке (приблизительно, погрешность выше)', approx: true, mm_per_px: mmpp, ipd_mm: ipd * mmpp, ts: Math.floor(Date.now() / 1000) };
+    return { source: 'iris', label: T('по радужке (приблизительно, погрешность выше)'), approx: true, mm_per_px: mmpp, ipd_mm: ipd * mmpp, ts: Math.floor(Date.now() / 1000) };
   },
   /* pts: 4 угла карты по порядку: левый верх, правый верх, правый низ, левый низ (в пикселях кадра) */
   fromCard(pts, ipdPx) {
@@ -4065,13 +4921,13 @@ FaceMesh.Calibrate = {
     const w = (dist(pts[0], pts[1]) + dist(pts[3], pts[2])) / 2, hh = (dist(pts[0], pts[3]) + dist(pts[1], pts[2])) / 2;
     if (w < 20 || hh < 12) return null;
     const mw = this.CARD_W / w, mh = this.CARD_H / hh, mmpp = (mw + mh) / 2, dev = Math.abs(mw - mh) / mmpp;
-    return { source: 'card', label: 'по банковской карте 85,6 мм', approx: false, mm_per_px: mmpp, ipd_mm: ipdPx * mmpp, skew: dev, ts: Math.floor(Date.now() / 1000) };
+    return { source: 'card', label: T('по банковской карте 85,6 мм'), approx: false, mm_per_px: mmpp, ipd_mm: ipdPx * mmpp, skew: dev, ts: Math.floor(Date.now() / 1000) };
   }
 };
 
 /* ===== Face Mesh: управление, панели, съёмка, сравнение, отчёт ===== */
-const SIGN_SYM = 'Числа для документирования, не диагноз';
-const SIGN_MOB = 'Наблюдение для врача, не оценка по клинической шкале';
+const SIGN_SYM = T('Числа для документирования, не диагноз');
+const SIGN_MOB = T('Наблюдение для врача, не оценка по клинической шкале');
 const fx = (v, n) => (v == null || !isFinite(v)) ? '-' : (v >= 0 ? '' : '−') + Math.abs(v).toFixed(n == null ? 3 : n);
 
 Object.assign(FaceMesh, {
@@ -4080,7 +4936,7 @@ Object.assign(FaceMesh, {
   mainVideo() { return this.role === 'doctor' ? this.els.remote : this.els.local; },
   otherVideo() { return this.role === 'doctor' ? this.els.local : this.els.remote; },
   fail(msg) {
-    this.unavailable = msg || 'Модуль Face Mesh недоступен';
+    this.unavailable = msg || T('Модуль Face Mesh недоступен');
     this.stopTrackers(); this.mode = 'off';
     Toast.show(this.unavailable, 'err', 7000);
     if (CallUi.r.bMesh) CallUi.r.bMesh.classList.add('hidden');
@@ -4089,7 +4945,7 @@ Object.assign(FaceMesh, {
   mount(els) {
     this.stopAll();
     this.els = els; this.role = els.role; this.mode = 'off'; this.photos = []; this.latest = {}; this.info = null; this.cal = null; this.consent = false; this.coach = false; this.hist = null; this.remotePose = null;
-    this.unavailable = Cfg.mediapipe ? '' : 'Модуль Face Mesh отключён: на сервере нет файлов MediaPipe. Видеозвонок работает без него.';
+    this.unavailable = Cfg.mediapipe ? '' : T('Модуль Face Mesh отключён: на сервере нет файлов MediaPipe. Видеозвонок работает без него.');
     if (this.unavailable && CallUi.r.bMesh) CallUi.r.bMesh.classList.add('hidden');
     const fp = App.proto.face || {}; this.tol = fp.tolerance || 5; this.poses = (fp.poses && fp.poses.length) ? fp.poses : ['frontal', 'left45', 'right45', 'left90', 'right90'];
     this.frameEl = h('div', { class: 'frame-ok hidden' }); els.wrap.append(this.frameEl);
@@ -4134,9 +4990,9 @@ Object.assign(FaceMesh, {
     return new Promise(res => {
       let done = false; const fin = v => { if (!done) { done = true; res(v); } };
       const s = Ui.sheet({
-        title: 'Согласие на анализ лица', onClose: () => fin(false),
-        actions: [{ label: 'Не согласен(на)', kind: 'sec', onClick: () => fin(false) }, {
-          label: 'Согласен(на)', kind: 'pri', onClick: async () => {
+        title: T('Согласие на анализ лица'), onClose: () => fin(false),
+        actions: [{ label: T('Не согласен(на)'), kind: 'sec', onClick: () => fin(false) }, {
+          label: T('Согласен(на)'), kind: 'pri', onClick: async () => {
             this.consent = true;
             try { sessionStorage.setItem('mars_fc_' + Api.room, '1'); } catch (e) { /* ignore */ }
             try { await Api.ev('control', { action: 'face_consent', granted: true }); } catch (e) { Toast.err(e); }
@@ -4144,10 +5000,10 @@ Object.assign(FaceMesh, {
           }
         }]
       });
-      s.el.append(h('p', { style: 'margin:0', text: 'Что анализируется: изображение с вашей камеры обрабатывается локально, на вашем устройстве.' }),
-        h('p', { style: 'margin:0', text: 'Что передаётся врачу: числовые результаты и снимки, которые вы подтверждаете сами.' }),
-        h('p', { style: 'margin:0', text: 'Что не сохраняется: поток видео. Он не записывается и не отправляется для анализа на сервер.' }),
-        h('p', { class: 'note', style: 'margin:0', text: 'Согласие можно отозвать в любой момент в разделе «Задания».' }));
+      s.el.append(h('p', { style: 'margin:0', text: T('Что анализируется: изображение с вашей камеры обрабатывается локально, на вашем устройстве.') }),
+        h('p', { style: 'margin:0', text: T('Что передаётся врачу: числовые результаты и снимки, которые вы подтверждаете сами.') }),
+        h('p', { style: 'margin:0', text: T('Что не сохраняется: поток видео. Он не записывается и не отправляется для анализа на сервер.') }),
+        h('p', { class: 'note', style: 'margin:0', text: T('Согласие можно отозвать в любой момент в разделе «Задания».') }));
     });
   },
   async revoke() {
@@ -4160,7 +5016,7 @@ Object.assign(FaceMesh, {
   async setMode(m) {
     if (this.unavailable) { Toast.show(this.unavailable); return; }
     if (m !== 'off' && !this.consent) {
-      if (this.role === 'doctor') { Toast.show('Пациент не дал согласие на анализ лица'); this.refreshPanes(); return; }
+      if (this.role === 'doctor') { Toast.show(T('Пациент не дал согласие на анализ лица')); this.refreshPanes(); return; }
       if (!(await this.ensureConsent())) { this.refreshPanes(); return; }
     }
     this.mode = m; this.refreshPanes(); await this.sync();
@@ -4178,7 +5034,7 @@ Object.assign(FaceMesh, {
       else if (!need && this.trk) { this.trk.stop(); this.trk = null; this.info = null; this.showInfo(); }
       if (need2 && !this.trk2 && this.trk) { this.trk2 = new FMTracker(this.otherVideo(), { fps: 10 }); await this.trk2.start(); }
       else if (!need2 && this.trk2) { this.trk2.stop(); this.trk2 = null; }
-    } catch (e) { console.error(e); this.trk = null; this.trk2 = null; this.starting = false; this.fail('Не удалось запустить Face Mesh: ' + ((e && e.message) || 'ошибка инициализации') + '. Видеозвонок продолжает работать.'); return; }
+    } catch (e) { console.error(e); this.trk = null; this.trk2 = null; this.starting = false; this.fail(T('Не удалось запустить Face Mesh: ') + ((e && e.message) || T('ошибка инициализации')) + T('. Видеозвонок продолжает работать.')); return; }
     this.starting = false;
     if (this.again) { this.again = false; return this.sync(); }
   },
@@ -4194,15 +5050,15 @@ Object.assign(FaceMesh, {
   statusTick() {
     const t = this.trk; if (!t || !this.info) return;
     const lost = t.lost();
-    if (lost && !this.info.lost) { this.info = Object.assign({}, this.info, { lost: true, level: 'bad', hint: 'Лицо не найдено' }); this.showInfo(); this.sendInfo(performance.now(), true); }
+    if (lost && !this.info.lost) { this.info = Object.assign({}, this.info, { lost: true, level: 'bad', hint: T('Лицо не найдено') }); this.showInfo(); this.sendInfo(performance.now(), true); }
   },
   showInfo() {
     const i = this.info, pq = this.els.pq, hint = this.els.hint; if (!pq) return;
     if (!i || !this.trk) { pq.classList.add('hidden'); hint.textContent = ''; if (this.frameEl) this.frameEl.classList.add('hidden'); return; }
     const lv = i.lost ? 'bad' : i.level;
     pq.classList.remove('hidden');
-    pq.replaceChildren(h('span', { class: 'dot ' + { good: 'ok', medium: 'mid', bad: 'bad' }[lv] }), h('span', { text: (this.role === 'doctor' ? 'Поза по сжатому видео: ' : 'Поза: ') + { good: 'хорошая', medium: 'средняя', bad: 'плохая' }[lv] }));
-    let txt = i.lost ? 'Лицо не найдено' : (i.multi ? 'В кадре несколько лиц: используется самое крупное. ' : '') + i.hint;
+    pq.replaceChildren(h('span', { class: 'dot ' + { good: 'ok', medium: 'mid', bad: 'bad' }[lv] }), h('span', { text: (this.role === 'doctor' ? T('Поза по сжатому видео: ') : T('Поза: ')) + { good: T('хорошая'), medium: T('средняя'), bad: T('плохая') }[lv] }));
+    let txt = i.lost ? T('Лицо не найдено') : (i.multi ? T('В кадре несколько лиц: используется самое крупное. ') : '') + i.hint;
     if (this.role === 'patient' && (this.coach || this.busy)) hint.textContent = txt; else hint.textContent = '';
     if (this.frameEl) this.frameEl.classList.toggle('hidden', !(lv === 'good' && (this.coach || this.busy)));
   },
@@ -4210,7 +5066,7 @@ Object.assign(FaceMesh, {
     if (this.role !== 'patient' || !(this.coach || this.busy) || !this.info) return;
     if (!force && now - this.lastSend < 500) return; this.lastSend = now;
     const i = this.info;
-    Api.ev('face', { kind: 'pose', level: i.lost ? 'bad' : i.level, yaw: Math.round(i.yaw || 0), pitch: Math.round(i.pitch || 0), roll: Math.round(i.roll || 0), hint: i.lost ? 'Лицо не найдено' : i.hint, lost: !!i.lost, multi: !!i.multi, tol: this.tol }).catch(() => { });
+    Api.ev('face', { kind: 'pose', level: i.lost ? 'bad' : i.level, yaw: Math.round(i.yaw || 0), pitch: Math.round(i.pitch || 0), roll: Math.round(i.roll || 0), hint: i.lost ? T('Лицо не найдено') : i.hint, lost: !!i.lost, multi: !!i.multi, tol: this.tol }).catch(() => { });
   },
   autoFrame() {
     if (this.role !== 'doctor' || !this.els.stage) return;
@@ -4232,25 +5088,25 @@ Object.assign(FaceMesh, {
     if (this.role !== 'doctor') return;
     if (d.kind === 'consent') { this.setConsent(!!d.granted); }
     else if (d.kind === 'pose') { this.remotePose = d; this.updatePoseRow(); }
-    else if (d.kind === 'photo') { if (!this.photos.find(p => p.id === d.id)) { this.photos.push({ id: d.id, pose: d.pose, ts: d.ts }); Toast.show('Получен снимок: ' + (POSE_NAMES[d.pose] || d.pose)); this.refreshHistory(); if (this.dTab === 'capture') this.renderDoctor(); } }
+    else if (d.kind === 'photo') { if (!this.photos.find(p => p.id === d.id)) { this.photos.push({ id: d.id, pose: d.pose, ts: d.ts }); Toast.show(T('Получен снимок: ') + (POSE_NAMES[d.pose] || d.pose)); this.refreshHistory(); if (this.dTab === 'capture') this.renderDoctor(); } }
   },
   onMeasure(d) {
     if (this.role !== 'doctor') return;
-    if (d.kind === 'calibration') { this.cal = d.calibration; Toast.show('Получена калибровка размеров'); }
-    else if (d.kind === 'symmetry' || d.kind === 'mobility') { this.latest[d.kind] = d; Toast.show(d.kind === 'symmetry' ? 'Получены метрики симметрии' : 'Получены результаты подвижности'); this.hist = null; }
+    if (d.kind === 'calibration') { this.cal = d.calibration; Toast.show(T('Получена калибровка размеров')); }
+    else if (d.kind === 'symmetry' || d.kind === 'mobility') { this.latest[d.kind] = d; Toast.show(d.kind === 'symmetry' ? T('Получены метрики симметрии') : T('Получены результаты подвижности')); this.hist = null; }
     if (d.kind === 'symmetry') this.repNext(d);
     this.renderDoctor();
   },
   patientRequest(d) {
     if (d.action === 'set_face') { if (d.poses && d.poses.length) this.poses = d.poses; if (d.tolerance) this.tol = d.tolerance; this.refreshPanes(); return; }
-    const kinds = { symmetry: 'измерение симметрии лица', mobility: 'задания на подвижность лица', capture: 'стандартную фотосъёмку лица', calibrate: 'калибровку размеров' };
+    const kinds = { symmetry: T('измерение симметрии лица'), mobility: T('задания на подвижность лица'), capture: T('стандартную фотосъёмку лица'), calibrate: T('калибровку размеров') };
     let what = '', run = null;
     if (d.action === 'request_measure' && kinds[d.kind]) { what = kinds[d.kind]; run = () => this.startKind(d.kind); }
-    else if (d.action === 'request_retake') { what = 'повторить снимок: ' + (POSE_NAMES[d.pose] || ''); run = () => this.Capture.open([d.pose]); }
+    else if (d.action === 'request_retake') { what = T('повторить снимок: ') + (POSE_NAMES[d.pose] || ''); run = () => this.Capture.open([d.pose]); }
     if (!run) return;
     Ui.sound();
-    const s = Ui.sheet({ title: 'Просьба врача', actions: [{ label: 'Позже', kind: 'sec' }, { label: 'Начать', kind: 'pri', onClick: () => { run(); } }] });
-    s.el.append(h('p', { class: 'big-hint', text: 'Врач просит выполнить: ' + what }), h('p', { class: 'note', style: 'text-align:center;margin:0', text: 'Вы подтверждаете каждый результат перед отправкой.' }));
+    const s = Ui.sheet({ title: T('Просьба врача'), actions: [{ label: T('Позже'), kind: 'sec' }, { label: T('Начать'), kind: 'pri', onClick: () => { run(); } }] });
+    s.el.append(h('p', { class: 'big-hint', text: T('Врач просит выполнить: ') + what }), h('p', { class: 'note', style: 'text-align:center;margin:0', text: T('Вы подтверждаете каждый результат перед отправкой.') }));
   },
   startKind(k) { if (k === 'symmetry') this.measureSym(); else if (k === 'mobility') this.measureMob(); else if (k === 'capture') this.Capture.open(this.poses); else if (k === 'calibrate') this.calibrateSheet(); },
   loadProto(p) {
@@ -4260,45 +5116,45 @@ Object.assign(FaceMesh, {
   /* --- вспомогательное: таблицы --- */
   symTable(p, forPrint) {
     const k = p.calibration && p.calibration.ipd_mm, rows = p.rows || [];
-    const unit = k ? ' (МЗР / мм)' : ' (доли МЗР)';
-    const src = (k ? ' Источник масштаба: ' + p.calibration.label + '.' : ' Калибровки нет: значения в мм не показываются.') + (p.source === 'device' ? ' Рассчитано на устройстве.' : p.source === 'vision' ? ' Рассчитано сервисом анализа.' : '');
+    const unit = k ? T(' (МЗР / мм)') : T(' (доли МЗР)');
+    const src = (k ? T(' Источник масштаба: ') + T(p.calibration.label) + '.' : T(' Калибровки нет: значения в мм не показываются.')) + (p.source === 'device' ? T(' Рассчитано на устройстве.') : p.source === 'vision' ? T(' Рассчитано сервисом анализа.') : '');
     return h('div', { class: 'stack' },
-      h('table', { class: 'tb' }, h('tr', null, h('th', { text: 'Метрика' + unit }), h('th', { class: 'n', text: 'Правая' }), h('th', { class: 'n', text: 'Левая' }), h('th', { class: 'n', text: 'Разность' })),
-        rows.map(r => h('tr', null, h('td', { text: r.label }), h('td', { class: 'n', text: fx(r.right) + (k ? ' / ' + fx(r.right_mm, 1) : '') }), h('td', { class: 'n', text: fx(r.left) + (k ? ' / ' + fx(r.left_mm, 1) : '') }), h('td', { class: 'n', text: fx(r.diff) + (k ? ' / ' + fx(r.diff_mm, 1) : '') })))),
-      h('table', { class: 'tb' }, (p.singles || []).map(s => h('tr', null, h('td', { text: s.label }), h('td', { class: 'n', text: s.unit === 'deg' ? fx(s.value, 1) + '°' : fx(s.value) + (k && s.value_mm != null ? ' / ' + fx(s.value_mm, 1) + ' мм' : '') })))),
-      h('p', { class: 'note', style: 'margin:0', text: 'МЗР: межзрачковое расстояние. Положительное значение смещения: в сторону левой половины лица пациента. Кадров в выборке: ' + (p.samples || 0) + '.' + src }),
+      h('table', { class: 'tb' }, h('tr', null, h('th', { text: T('Метрика') + unit }), h('th', { class: 'n', text: T('Правая') }), h('th', { class: 'n', text: T('Левая') }), h('th', { class: 'n', text: T('Разность') })),
+        rows.map(r => h('tr', null, h('td', { text: T(r.label) }), h('td', { class: 'n', text: fx(r.right) + (k ? ' / ' + fx(r.right_mm, 1) : '') }), h('td', { class: 'n', text: fx(r.left) + (k ? ' / ' + fx(r.left_mm, 1) : '') }), h('td', { class: 'n', text: fx(r.diff) + (k ? ' / ' + fx(r.diff_mm, 1) : '') })))),
+      h('table', { class: 'tb' }, (p.singles || []).map(s => h('tr', null, h('td', { text: T(s.label) }), h('td', { class: 'n', text: s.unit === 'deg' ? fx(s.value, 1) + '°' : fx(s.value) + (k && s.value_mm != null ? ' / ' + fx(s.value_mm, 1) + T(' мм') : '') })))),
+      h('p', { class: 'note', style: 'margin:0', text: T('МЗР: межзрачковое расстояние. Положительное значение смещения: в сторону левой половины лица пациента. Кадров в выборке: ') + (p.samples || 0) + '.' + src }),
       h('p', { class: 'note', style: 'margin:0;font-weight:600', text: SIGN_SYM }));
   },
   /* крупные значения по сторонам: правая и левая своим цветом, как дозировка на упаковке */
   doseCard(title, right, left, unit, foot) {
     const sd = (cls, name, v) => h('div', { class: 'sd ' + cls }, h('span', { class: 'k', text: name }), h('span', { class: 'n', text: v }), unit ? h('span', { class: 'u', text: unit }) : null);
     return h('div', { class: 'dose', role: 'group', 'aria-label': title },
-      h('h4', { text: title }), h('div', { class: 'sides' }, sd('r', 'Правая', right), sd('l', 'Левая', left)),
+      h('h4', { text: title }), h('div', { class: 'sides' }, sd('r', T('Правая'), right), sd('l', T('Левая'), left)),
       foot ? h('div', { class: 'df', text: foot }) : null);
   },
   symDoses(p) {
-    const k = p.calibration && p.calibration.ipd_mm, n = k ? 1 : 3, f = v => fx(v, n).replace('.', ',');
-    const hint = k ? null : h('p', { class: 'note', style: 'margin:0', text: 'Без калибровки значения даны в долях межзрачкового расстояния (МЗР): 0,100 — одна десятая расстояния между зрачками этого пациента. Так значения сравнимы между приёмами, даже если пациент сидел дальше или ближе к камере. Чтобы видеть миллиметры, запросите калибровку.' });
-    return h('div', { class: 'stack' }, hint, h('div', { class: 'doses' }, (p.rows || []).map(r => this.doseCard(r.label,
-      f(k ? r.right_mm : r.right), f(k ? r.left_mm : r.left), k ? 'мм' : 'МЗР',
-      'Разность (правая − левая): ' + f(k ? r.diff_mm : r.diff) + (k ? ' мм' : '')))));
+    const k = p.calibration && p.calibration.ipd_mm, n = k ? 1 : 3, f = v => fx(v, n).replace('.', DEC);
+    const hint = k ? null : h('p', { class: 'note', style: 'margin:0', text: T('Без калибровки значения даны в долях межзрачкового расстояния (МЗР): 0,100 — одна десятая расстояния между зрачками этого пациента. Так значения сравнимы между приёмами, даже если пациент сидел дальше или ближе к камере. Чтобы видеть миллиметры, запросите калибровку.') });
+    return h('div', { class: 'stack' }, hint, h('div', { class: 'doses' }, (p.rows || []).map(r => this.doseCard(T(r.label),
+      f(k ? r.right_mm : r.right), f(k ? r.left_mm : r.left), k ? T('мм') : T('МЗР'),
+      T('Разность (правая − левая): ') + f(k ? r.diff_mm : r.diff) + (k ? T(' мм') : '')))));
   },
   mobDoses(p) {
-    const f = v => fx(v, 2).replace('.', ',');
+    const f = v => fx(v, 2).replace('.', DEC);
     return h('div', { class: 'doses' }, (p.tasks || []).map(t => t.single != null
-      ? h('div', { class: 'dose', role: 'group', 'aria-label': t.label }, h('h4', { text: t.label }), h('div', { class: 'df', text: 'Обе стороны вместе (модель не разделяет): ' + f(t.single) }))
-      : this.doseCard(t.label, f(t.right), f(t.left), '', 'Соотношение сторон: ' + (t.ratio == null ? '-' : f(t.ratio)) + ' (1 — одинаково)')));
+      ? h('div', { class: 'dose', role: 'group', 'aria-label': T(t.label) }, h('h4', { text: T(t.label) }), h('div', { class: 'df', text: T('Обе стороны вместе (модель не разделяет): ') + f(t.single) }))
+      : this.doseCard(T(t.label), f(t.right), f(t.left), '', T('Соотношение сторон: ') + (t.ratio == null ? '-' : f(t.ratio)) + T(' (1 — одинаково)'))));
   },
   fold(title, ...kids) { return h('details', { class: 'fold' }, h('summary', { text: title }), h('div', { class: 'stack' }, ...kids)); },
   mobTable(p) {
     return h('div', { class: 'stack' },
-      h('table', { class: 'tb' }, h('tr', null, h('th', { text: 'Задание (максимум коэффициента 0-1)' }), h('th', { class: 'n', text: 'Правая' }), h('th', { class: 'n', text: 'Левая' }), h('th', { class: 'n', text: 'Соотношение' })),
-        (p.tasks || []).map(t => t.single != null ? h('tr', null, h('td', { text: t.label + ' (обе стороны, модель не разделяет)' }), h('td', { class: 'n', text: fx(t.single, 2) }), h('td', { class: 'n', text: '-' }), h('td', { class: 'n', text: '-' }))
-          : h('tr', null, h('td', { text: t.label }), h('td', { class: 'n', text: fx(t.right, 2) }), h('td', { class: 'n', text: fx(t.left, 2) }), h('td', { class: 'n', text: t.ratio == null ? '-' : fx(t.ratio, 2) })))),
+      h('table', { class: 'tb' }, h('tr', null, h('th', { text: T('Задание (максимум коэффициента 0-1)') }), h('th', { class: 'n', text: T('Правая') }), h('th', { class: 'n', text: T('Левая') }), h('th', { class: 'n', text: T('Соотношение') })),
+        (p.tasks || []).map(t => t.single != null ? h('tr', null, h('td', { text: T(t.label) + T(' (обе стороны, модель не разделяет)') }), h('td', { class: 'n', text: fx(t.single, 2) }), h('td', { class: 'n', text: '-' }), h('td', { class: 'n', text: '-' }))
+          : h('tr', null, h('td', { text: T(t.label) }), h('td', { class: 'n', text: fx(t.right, 2) }), h('td', { class: 'n', text: fx(t.left, 2) }), h('td', { class: 'n', text: t.ratio == null ? '-' : fx(t.ratio, 2) })))),
       h('p', { class: 'note', style: 'margin:0;font-weight:600', text: SIGN_MOB }));
   },
   async sendResult(payload) {
-    try { await Api.post('/rooms/' + Api.room + '/measurements', payload); await Api.ev('measure', payload); Toast.show('Результат отправлен врачу'); return true; }
+    try { await Api.post('/rooms/' + Api.room + '/measurements', payload); await Api.ev('measure', payload); Toast.show(T('Результат отправлен врачу')); return true; }
     catch (e) { Toast.err(e); return false; }
   },
   /* лист с превью камеры для заданий пациента */
@@ -4316,109 +5172,109 @@ Object.assign(FaceMesh, {
   async measureSym() {
     if (!(await this.ensureConsent())) return;
     this.busy++; await this.sync(); if (!this.trk) { this.busy--; return; }
-    const T = this.taskSheet('Измерение симметрии');
+    const TS = this.taskSheet(T('Измерение симметрии'));
     const go = async () => {
-      T.body.replaceChildren();
+      TS.body.replaceChildren();
       try {
-        const loc = await this.Symmetry.run((p, msg) => { T.prog.value = p; T.hint.textContent = (this.trk && this.trk.lost()) ? 'Лицо не найдено' : msg; }, T.signal);
-        if (T.isClosed()) return;
-        T.hint.textContent = 'Расчёт...';
-        const res = await this.Remote.pick('symmetry', { frames: loc._frames, tolerance: this.tol, calibration: this.cal }, loc, T.signal);
-        if (T.isClosed()) return;
-        T.hint.textContent = 'Готово'; T.prog.value = 1;
-        T.body.replaceChildren(this.symTable(res), h('div', { class: 'row wrap' },
-          h('button', { class: 'btn pri', onclick: async e => { e.target.disabled = true; if (await this.sendResult(res)) T.s.close(); else e.target.disabled = false; } }, 'Отправить врачу'),
-          h('button', { class: 'btn sec', onclick: go }, 'Повторить')));
-      } catch (e) { if (T.isClosed()) return; T.hint.textContent = ''; T.body.replaceChildren(h('p', { text: e.message }), h('button', { class: 'btn pri', onclick: go }, 'Повторить')); }
+        const loc = await this.Symmetry.run((p, msg) => { TS.prog.value = p; TS.hint.textContent = (this.trk && this.trk.lost()) ? T('Лицо не найдено') : msg; }, TS.signal);
+        if (TS.isClosed()) return;
+        TS.hint.textContent = T('Расчёт...');
+        const res = await this.Remote.pick('symmetry', { frames: loc._frames, tolerance: this.tol, calibration: this.cal }, loc, TS.signal);
+        if (TS.isClosed()) return;
+        TS.hint.textContent = T('Готово'); TS.prog.value = 1;
+        TS.body.replaceChildren(this.symTable(res), h('div', { class: 'row wrap' },
+          h('button', { class: 'btn pri', onclick: async e => { e.target.disabled = true; if (await this.sendResult(res)) TS.s.close(); else e.target.disabled = false; } }, T('Отправить врачу')),
+          h('button', { class: 'btn sec', onclick: go }, T('Повторить'))));
+      } catch (e) { if (TS.isClosed()) return; TS.hint.textContent = ''; TS.body.replaceChildren(h('p', { text: e.message }), h('button', { class: 'btn pri', onclick: go }, T('Повторить'))); }
     };
     go();
   },
   async measureMob() {
     if (!(await this.ensureConsent())) return;
     this.busy++; await this.sync(); if (!this.trk) { this.busy--; return; }
-    const T = this.taskSheet('Подвижность лица'), out = [];
+    const TS = this.taskSheet(T('Подвижность лица')), out = [];
     const finish = async () => {
       const loc = { kind: 'mobility', pose_ok: true, tolerance: Math.max(this.tol * 2, 10), tasks: out.slice(), ts: Math.floor(Date.now() / 1000) };
-      T.hint.textContent = 'Расчёт...'; T.body.replaceChildren();
+      TS.hint.textContent = T('Расчёт...'); TS.body.replaceChildren();
       let res;
-      try { res = await this.Remote.pick('mobility', { tasks: out.map(t => ({ id: t.id, frames: t._frames })), tolerance: this.tol }, loc, T.signal); }
-      catch (e) { if (T.isClosed()) return; T.hint.textContent = ''; T.body.replaceChildren(h('p', { text: e.message }), h('button', { class: 'btn pri', onclick: () => { out.length = 0; next(0); } }, 'Пройти заново')); return; }
-      if (T.isClosed()) return;
-      T.hint.textContent = 'Готово'; T.prog.value = 1;
-      T.body.replaceChildren(this.mobTable(res), h('div', { class: 'row wrap' },
-        h('button', { class: 'btn pri', onclick: async e => { e.target.disabled = true; if (await this.sendResult(res)) T.s.close(); else e.target.disabled = false; } }, 'Отправить врачу'),
-        h('button', { class: 'btn sec', onclick: () => { out.length = 0; next(0); } }, 'Пройти заново')));
+      try { res = await this.Remote.pick('mobility', { tasks: out.map(t => ({ id: t.id, frames: t._frames })), tolerance: this.tol }, loc, TS.signal); }
+      catch (e) { if (TS.isClosed()) return; TS.hint.textContent = ''; TS.body.replaceChildren(h('p', { text: e.message }), h('button', { class: 'btn pri', onclick: () => { out.length = 0; next(0); } }, T('Пройти заново'))); return; }
+      if (TS.isClosed()) return;
+      TS.hint.textContent = T('Готово'); TS.prog.value = 1;
+      TS.body.replaceChildren(this.mobTable(res), h('div', { class: 'row wrap' },
+        h('button', { class: 'btn pri', onclick: async e => { e.target.disabled = true; if (await this.sendResult(res)) TS.s.close(); else e.target.disabled = false; } }, T('Отправить врачу')),
+        h('button', { class: 'btn sec', onclick: () => { out.length = 0; next(0); } }, T('Пройти заново'))));
     };
     const next = i => {
-      if (T.isClosed()) return;
+      if (TS.isClosed()) return;
       if (i >= this.Mobility.TASKS.length) return finish();
       const task = this.Mobility.TASKS[i];
-      T.prog.value = 0; T.hint.textContent = task.label + '. Нажмите «Начать»';
-      T.body.replaceChildren(h('button', { class: 'btn pri lg', onclick: async () => {
-        T.body.replaceChildren(); T.hint.textContent = task.cmd;
-        try { const r = await this.Mobility.runTask(task, (p, m) => { T.prog.value = Math.min(1, p); T.hint.textContent = m; }, T.signal); out.push(r); next(i + 1); }
-        catch (e) { if (T.isClosed()) return; T.body.replaceChildren(h('p', { text: e.message }), h('button', { class: 'btn pri', onclick: () => next(i) }, 'Повторить задание')); }
-      } }, 'Начать'), h('span', { class: 'note', text: 'Задание ' + (i + 1) + ' из ' + this.Mobility.TASKS.length }));
+      TS.prog.value = 0; TS.hint.textContent = T(task.label) + T('. Нажмите «Начать»');
+      TS.body.replaceChildren(h('button', { class: 'btn pri lg', onclick: async () => {
+        TS.body.replaceChildren(); TS.hint.textContent = task.cmd;
+        try { const r = await this.Mobility.runTask(task, (p, m) => { TS.prog.value = Math.min(1, p); TS.hint.textContent = m; }, TS.signal); out.push(r); next(i + 1); }
+        catch (e) { if (TS.isClosed()) return; TS.body.replaceChildren(h('p', { text: e.message }), h('button', { class: 'btn pri', onclick: () => next(i) }, T('Повторить задание'))); }
+      } }, T('Начать')), h('span', { class: 'note', text: T('Задание ') + (i + 1) + T(' из ') + this.Mobility.TASKS.length }));
     };
     next(0);
   },
   async calibrateSheet() {
     if (!(await this.ensureConsent())) return;
     this.busy++; await this.sync(); if (!this.trk) { this.busy--; return; }
-    const T = this.taskSheet('Калибровка размеров'), C = this.Calibrate;
+    const TS = this.taskSheet(T('Калибровка размеров')), C = this.Calibrate;
     const saveCal = async cal => {
       this.cal = cal;
-      if (await this.sendResult({ kind: 'calibration', calibration: cal, ts: cal.ts })) T.s.close();
+      if (await this.sendResult({ kind: 'calibration', calibration: cal, ts: cal.ts })) TS.s.close();
     };
     const menu = () => {
-      T.hint.textContent = ''; T.prog.value = 0;
-      T.body.replaceChildren(
-        h('p', { class: 'note', style: 'margin:0', text: 'Без калибровки показываются только безразмерные индексы. Калибровка нужна для значений в миллиметрах и действует только в анфасе.' }),
-        h('button', { class: 'btn pri', onclick: card }, 'По банковской карте (85,6 мм)'),
-        h('button', { class: 'btn sec', onclick: iris }, 'По радужке (приблизительно)'));
+      TS.hint.textContent = ''; TS.prog.value = 0;
+      TS.body.replaceChildren(
+        h('p', { class: 'note', style: 'margin:0', text: T('Без калибровки показываются только безразмерные индексы. Калибровка нужна для значений в миллиметрах и действует только в анфасе.') }),
+        h('button', { class: 'btn pri', onclick: card }, T('По банковской карте (85,6 мм)')),
+        h('button', { class: 'btn sec', onclick: iris }, T('По радужке (приблизительно)')));
     };
     const iris = async () => {
-      T.body.replaceChildren(); T.hint.textContent = 'Смотрите прямо в камеру';
+      TS.body.replaceChildren(); TS.hint.textContent = T('Смотрите прямо в камеру');
       const S = []; const t0 = performance.now();
-      const fn = cur => { const e = this.Pose.euler(cur); if (!this.Pose.inTol(e, this.tol)) { T.hint.textContent = 'Смотрите прямо в камеру'; return; } const ir = C.irisPx(cur), ip = C.ipdPx(cur); if (ir && ip) S.push({ iris: ir, ipd: ip }); T.prog.value = Math.min(1, S.length / 30); };
+      const fn = cur => { const e = this.Pose.euler(cur); if (!this.Pose.inTol(e, this.tol)) { TS.hint.textContent = T('Смотрите прямо в камеру'); return; } const ir = C.irisPx(cur), ip = C.ipdPx(cur); if (ir && ip) S.push({ iris: ir, ipd: ip }); TS.prog.value = Math.min(1, S.length / 30); };
       this.subs.add(fn);
       const wait = setInterval(() => {
-        if (T.isClosed() || S.length >= 30 || performance.now() - t0 > 15000) {
-          clearInterval(wait); this.subs.delete(fn); if (T.isClosed()) return;
+        if (TS.isClosed() || S.length >= 30 || performance.now() - t0 > 15000) {
+          clearInterval(wait); this.subs.delete(fn); if (TS.isClosed()) return;
           const cal = S.length >= 12 ? C.fromIris(S) : null;
-          if (!cal) { T.body.replaceChildren(h('p', { text: 'Не удалось получить устойчивый кадр в анфасе. Повторите.' }), h('button', { class: 'btn pri', onclick: iris }, 'Повторить')); return; }
-          T.hint.textContent = 'Приблизительно, погрешность выше';
-          T.body.replaceChildren(h('p', { style: 'margin:0', text: 'Межзрачковое расстояние: ' + cal.ipd_mm.toFixed(1).replace('.', ',') + ' мм (' + cal.label + ').' }),
-            h('div', { class: 'row wrap' }, h('button', { class: 'btn pri', onclick: () => saveCal(cal) }, 'Сохранить'), h('button', { class: 'btn sec', onclick: menu }, 'Назад')));
+          if (!cal) { TS.body.replaceChildren(h('p', { text: T('Не удалось получить устойчивый кадр в анфасе. Повторите.') }), h('button', { class: 'btn pri', onclick: iris }, T('Повторить'))); return; }
+          TS.hint.textContent = T('Приблизительно, погрешность выше');
+          TS.body.replaceChildren(h('p', { style: 'margin:0', text: T('Межзрачковое расстояние: ') + cal.ipd_mm.toFixed(1).replace('.', DEC) + T(' мм (') + T(cal.label) + ').' }),
+            h('div', { class: 'row wrap' }, h('button', { class: 'btn pri', onclick: () => saveCal(cal) }, T('Сохранить')), h('button', { class: 'btn sec', onclick: menu }, T('Назад'))));
         }
       }, 200);
     };
     const card = () => {
-      T.hint.textContent = 'Держите карту у лба или щеки, лицо анфас';
-      T.body.replaceChildren(h('p', { class: 'note', style: 'margin:0', text: 'Карту нужно держать в одной плоскости с лицом, ровно, лицом к камере. Нажмите «Сделать кадр», затем отметьте четыре угла карты.' }),
-        h('button', { class: 'btn pri', onclick: shot }, 'Сделать кадр'), h('button', { class: 'btn sec', onclick: menu }, 'Назад'));
+      TS.hint.textContent = T('Держите карту у лба или щеки, лицо анфас');
+      TS.body.replaceChildren(h('p', { class: 'note', style: 'margin:0', text: T('Карту нужно держать в одной плоскости с лицом, ровно, лицом к камере. Нажмите «Сделать кадр», затем отметьте четыре угла карты.') }),
+        h('button', { class: 'btn pri', onclick: shot }, T('Сделать кадр')), h('button', { class: 'btn sec', onclick: menu }, T('Назад')));
     };
     const shot = () => {
       const trk = this.trk, cur = trk && trk.cur, e = cur && this.Pose.euler(cur);
-      if (!cur || trk.lost() || !this.Pose.inTol(e, this.tol)) { Toast.show('Нужен анфас в допуске: ' + (this.info && this.info.hint || 'смотрите прямо в камеру')); return; }
+      if (!cur || trk.lost() || !this.Pose.inTol(e, this.tol)) { Toast.show(T('Нужен анфас в допуске: ') + (this.info && this.info.hint || T('смотрите прямо в камеру'))); return; }
       const v = this.els.local, cv = document.createElement('canvas'); cv.width = v.videoWidth; cv.height = v.videoHeight; cv.getContext('2d').drawImage(v, 0, 0);
       cv.style.cssText = 'width:100%;border-radius:var(--r2);touch-action:none;cursor:crosshair'; const pts = [];
-      const names = ['левый верхний', 'правый верхний', 'правый нижний', 'левый нижний'];
-      T.hint.textContent = 'Отметьте угол карты: ' + names[0];
+      const names = [T('левый верхний'), T('правый верхний'), T('правый нижний'), T('левый нижний')];
+      TS.hint.textContent = T('Отметьте угол карты: ') + names[0];
       const ctx = cv.getContext('2d');
       cv.addEventListener('pointerdown', ev => {
         const r = cv.getBoundingClientRect(); const p = { x: (ev.clientX - r.left) * cv.width / r.width, y: (ev.clientY - r.top) * cv.height / r.height };
         if (pts.length >= 4) return; pts.push(p);
         ctx.fillStyle = '#FF9500'; ctx.beginPath(); ctx.arc(p.x, p.y, Math.max(5, cv.width / 200), 0, 7); ctx.fill();
         if (pts.length > 1) { ctx.strokeStyle = '#FF9500'; ctx.lineWidth = Math.max(2, cv.width / 500); ctx.beginPath(); ctx.moveTo(pts[pts.length - 2].x, pts[pts.length - 2].y); ctx.lineTo(p.x, p.y); ctx.stroke(); }
-        if (pts.length < 4) { T.hint.textContent = 'Отметьте угол карты: ' + names[pts.length]; return; }
+        if (pts.length < 4) { TS.hint.textContent = T('Отметьте угол карты: ') + names[pts.length]; return; }
         const cal = C.fromCard(pts, C.ipdPx(cur));
-        if (!cal) { T.hint.textContent = 'Углы отмечены неверно'; T.body.replaceChildren(h('button', { class: 'btn pri', onclick: card }, 'Повторить')); return; }
-        T.hint.textContent = '';
-        T.body.append(h('p', { style: 'margin:8px 0 0', text: 'Межзрачковое расстояние: ' + cal.ipd_mm.toFixed(1).replace('.', ',') + ' мм; масштаб ' + cal.mm_per_px.toFixed(4) + ' мм/пиксель.' + (cal.skew > 0.08 ? ' Пропорции карты искажены (' + (cal.skew * 100).toFixed(0) + '%): карта наклонена, точность снижена.' : '') }),
-          h('div', { class: 'row wrap' }, h('button', { class: 'btn pri', onclick: () => saveCal(cal) }, 'Сохранить'), h('button', { class: 'btn sec', onclick: card }, 'Заново')));
+        if (!cal) { TS.hint.textContent = T('Углы отмечены неверно'); TS.body.replaceChildren(h('button', { class: 'btn pri', onclick: card }, T('Повторить'))); return; }
+        TS.hint.textContent = '';
+        TS.body.append(h('p', { style: 'margin:8px 0 0', text: T('Межзрачковое расстояние: ') + cal.ipd_mm.toFixed(1).replace('.', DEC) + T(' мм; масштаб ') + cal.mm_per_px.toFixed(4) + T(' мм/пиксель.') + (cal.skew > 0.08 ? T(' Пропорции карты искажены (') + (cal.skew * 100).toFixed(0) + T('%): карта наклонена, точность снижена.') : '') }),
+          h('div', { class: 'row wrap' }, h('button', { class: 'btn pri', onclick: () => saveCal(cal) }, T('Сохранить')), h('button', { class: 'btn sec', onclick: card }, T('Заново'))));
       });
-      T.body.replaceChildren(cv);
+      TS.body.replaceChildren(cv);
     };
     menu();
   },
@@ -4449,17 +5305,17 @@ Object.assign(FaceMesh, {
   thumbEl(p, onclick) {
     const img = h('img', { alt: POSE_NAMES[p.pose] || p.pose, src: 'data:image/gif;base64,R0lGODlhAQABAAAAACw=' });
     this.thumb(p.id).then(u => { img.src = u; }).catch(() => { });
-    const fig = h('figure', null, onclick ? h('button', { style: 'display:block;width:100%', onclick, 'aria-label': 'Выбрать снимок ' + fmtDT(p.ts) }, img) : img, h('figcaption', { text: (POSE_NAMES[p.pose] || p.pose) + ', ' + fmtDT(p.ts) }));
+    const fig = h('figure', null, onclick ? h('button', { style: 'display:block;width:100%', onclick, 'aria-label': T('Выбрать снимок ') + fmtDT(p.ts) }, img) : img, h('figcaption', { text: (POSE_NAMES[p.pose] || p.pose) + ', ' + fmtDT(p.ts) }));
     return fig;
   },
   refreshHistory() {
     const box = Files.hist; if (!box) return;
-    box.replaceChildren(h('h3', { text: 'Снимки этого приёма' }), this.photos.length ? h('div', { class: 'thumbs' }, this.photos.map(p => this.thumbEl(p))) : h('p', { class: 'note', style: 'margin:0', text: 'Снимков пока нет.' }));
+    box.replaceChildren(h('h3', { text: T('Снимки этого приёма') }), this.photos.length ? h('div', { class: 'thumbs' }, this.photos.map(p => this.thumbEl(p))) : h('p', { class: 'note', style: 'margin:0', text: T('Снимков пока нет.') }));
   },
   updatePoseRow() {
     const el = this.poseRow; if (!el) return; const d = this.remotePose;
-    if (!d) { el.textContent = 'Поза пациента: нет данных'; return; }
-    el.replaceChildren(h('span', { class: 'dot ' + { good: 'ok', medium: 'mid', bad: 'bad' }[d.level] }), ' Поза на устройстве пациента: ' + ({ good: 'хорошая', medium: 'средняя', bad: 'плохая' }[d.level]) + '. yaw ' + d.yaw + '°, pitch ' + d.pitch + '°, roll ' + d.roll + '°' + (d.hint ? '. ' + d.hint : ''));
+    if (!d) { el.textContent = T('Поза пациента: нет данных'); return; }
+    el.replaceChildren(h('span', { class: 'dot ' + { good: 'ok', medium: 'mid', bad: 'bad' }[d.level] }), T(' Поза на устройстве пациента: ') + ({ good: T('хорошая'), medium: T('средняя'), bad: T('плохая') }[d.level]) + '. yaw ' + d.yaw + '°, pitch ' + d.pitch + '°, roll ' + d.roll + '°' + (d.hint ? '. ' + d.hint : ''));
   },
   refreshPanes() {
     if (CallUi.r.bMesh) CallUi.r.bMesh.setAttribute('aria-pressed', String(this.mode !== 'off'));
@@ -4470,22 +5326,22 @@ Object.assign(FaceMesh, {
   patientPane() { this.pp = h('div', { class: 'stack' }); this.role = 'patient'; return this.pp; },
   renderPatient() {
     const box = this.pp; if (!box) return;
-    if (this.unavailable) { box.replaceChildren(h('h3', { text: 'Задания для лица' }), h('p', { text: this.unavailable })); return; }
+    if (this.unavailable) { box.replaceChildren(h('h3', { text: T('Задания для лица') }), h('p', { text: this.unavailable })); return; }
     if (!this.consent) {
-      box.replaceChildren(h('h3', { text: 'Задания для лица' }), h('p', { text: 'Врач может попросить вас выполнить несколько простых заданий перед камерой: фотосъёмку и проверку подвижности лица. Для этого нужно отдельное согласие на анализ лица.' }),
-        h('button', { class: 'btn pri lg', onclick: () => this.ensureConsent() }, 'Прочитать и дать согласие'));
+      box.replaceChildren(h('h3', { text: T('Задания для лица') }), h('p', { text: T('Врач может попросить вас выполнить несколько простых заданий перед камерой: фотосъёмку и проверку подвижности лица. Для этого нужно отдельное согласие на анализ лица.') }),
+        h('button', { class: 'btn pri lg', onclick: () => this.ensureConsent() }, T('Прочитать и дать согласие')));
       return;
     }
     const big = (label, fn, pressed) => h('button', { class: 'btn sec lg', style: 'justify-content:flex-start', 'aria-pressed': pressed == null ? null : String(pressed), onclick: fn }, label);
     const opts = h('div', { class: 'stack' },
-      h('label', { class: 'row', style: 'min-height:44px' }, h('input', { type: 'checkbox', style: 'width:22px;height:22px', checked: this.hideFace || null, onchange: e => { this.hideFace = e.target.checked; this.refreshPanes(); } }), ' Скрыть лицо при сохранении'),
-      h('label', { class: 'row', style: 'min-height:44px' }, h('input', { type: 'checkbox', style: 'width:22px;height:22px', checked: this.meshOnShot || null, disabled: this.hideFace || null, onchange: e => { this.meshOnShot = e.target.checked; } }), ' Накладывать сетку на снимок'));
-    box.replaceChildren(h('h3', { text: 'Задания для лица' }), h('p', { class: 'note', style: 'margin:0', text: 'Видео обрабатывается на вашем устройстве. Врачу уходят только числа и снимки, которые вы подтвердили.' }),
-      big(this.coach ? 'Выключить подсказки позы' : 'Подсказки позы', () => { this.coach = !this.coach; this.refreshPanes(); this.sync().then(() => { if (!this.coach) { this.showInfo(); } }); }, this.coach),
-      big('Измерение симметрии', () => this.measureSym()), big('Подвижность лица', () => this.measureMob()),
-      big('Фотосъёмка по ракурсам', () => this.Capture.open(this.poses)), big('Калибровка размеров', () => this.calibrateSheet()),
-      h('div', { class: 'stack' }, h('span', { class: 'note', text: 'Показать сетку на видео' }), Ui.segmented([['off', 'Выкл'], ['grid', 'Сетка'], ['contour', 'Контуры']], this.mode, m => this.setMode(m), 'Сетка на видео')),
-      opts, h('button', { class: 'btn txt', onclick: () => this.revoke() }, 'Отозвать согласие'));
+      h('label', { class: 'row', style: 'min-height:44px' }, h('input', { type: 'checkbox', style: 'width:22px;height:22px', checked: this.hideFace || null, onchange: e => { this.hideFace = e.target.checked; this.refreshPanes(); } }), T(' Скрыть лицо при сохранении')),
+      h('label', { class: 'row', style: 'min-height:44px' }, h('input', { type: 'checkbox', style: 'width:22px;height:22px', checked: this.meshOnShot || null, disabled: this.hideFace || null, onchange: e => { this.meshOnShot = e.target.checked; } }), T(' Накладывать сетку на снимок')));
+    box.replaceChildren(h('h3', { text: T('Задания для лица') }), h('p', { class: 'note', style: 'margin:0', text: T('Видео обрабатывается на вашем устройстве. Врачу уходят только числа и снимки, которые вы подтвердили.') }),
+      big(this.coach ? T('Выключить подсказки позы') : T('Подсказки позы'), () => { this.coach = !this.coach; this.refreshPanes(); this.sync().then(() => { if (!this.coach) { this.showInfo(); } }); }, this.coach),
+      big(T('Измерение симметрии'), () => this.measureSym()), big(T('Подвижность лица'), () => this.measureMob()),
+      big(T('Фотосъёмка по ракурсам'), () => this.Capture.open(this.poses)), big(T('Калибровка размеров'), () => this.calibrateSheet()),
+      h('div', { class: 'stack' }, h('span', { class: 'note', text: T('Показать сетку на видео') }), Ui.segmented([['off', T('Выкл')], ['grid', T('Сетка')], ['contour', T('Контуры')]], this.mode, m => this.setMode(m), T('Сетка на видео'))),
+      opts, h('button', { class: 'btn txt', onclick: () => this.revoke() }, T('Отозвать согласие')));
   },
   /* --- панель врача --- */
   doctorPane() {
@@ -4495,44 +5351,44 @@ Object.assign(FaceMesh, {
   },
   renderDoctor() {
     const box = this.dp; if (!box) return;
-    if (this.unavailable) { box.replaceChildren(h('h3', { text: 'Лицо' }), h('p', { text: this.unavailable })); return; }
-    const cons = this.consent ? h('span', { class: 'chip g', text: 'Пациент дал согласие' }) : h('span', { class: 'chip o', text: 'Пациент не дал согласие' });
+    if (this.unavailable) { box.replaceChildren(h('h3', { text: T('Лицо') }), h('p', { text: this.unavailable })); return; }
+    const cons = this.consent ? h('span', { class: 'chip g', text: T('Пациент дал согласие') }) : h('span', { class: 'chip o', text: T('Пациент не дал согласие') });
     this.poseRow = h('div', { class: 'sm', role: 'status', 'aria-live': 'polite' }); this.updatePoseRow();
-    const head = h('div', { class: 'stack' }, h('div', { class: 'rowb' }, h('h3', { text: 'Лицо' }), cons), this.poseRow,
-      this.fold('Сетка на видео и кадрирование',
-      Ui.segmented([['off', 'Выкл'], ['grid', 'Сетка'], ['contour', 'Контуры']], this.mode, m => this.setMode(m), 'Режим сетки (F)'),
-      h('label', { class: 'row', style: 'min-height:44px' }, h('input', { type: 'checkbox', style: 'width:22px;height:22px', checked: this.autocrop || null, disabled: !this.consent || null, onchange: e => { this.autocrop = e.target.checked; this.sync(); } }), ' Автокадрирование по лицу (только у вас)'),
-      h('label', { class: 'row', style: 'min-height:44px' }, h('input', { type: 'checkbox', style: 'width:22px;height:22px', checked: this.secondary || null, onchange: e => { this.secondary = e.target.checked; this.sync(); } }), ' Сетка и на самовидении'),
-      h('p', { class: 'note', style: 'margin:0', text: 'Сетка и поза по входящему видео построены по сжатому потоку и ориентировочны. Точные измерения выполняются на устройстве пациента.' })));
-    const tabs = Ui.segmented([['metrics', 'Метрики'], ['capture', 'Съёмка'], ['compare', 'Сравнение'], ['report', 'Отчёт']], this.dTab, t => { this.dTab = t; this.renderDoctor(); }, 'Разделы');
+    const head = h('div', { class: 'stack' }, h('div', { class: 'rowb' }, h('h3', { text: T('Лицо') }), cons), this.poseRow,
+      this.fold(T('Сетка на видео и кадрирование'),
+      Ui.segmented([['off', T('Выкл')], ['grid', T('Сетка')], ['contour', T('Контуры')]], this.mode, m => this.setMode(m), T('Режим сетки (F)')),
+      h('label', { class: 'row', style: 'min-height:44px' }, h('input', { type: 'checkbox', style: 'width:22px;height:22px', checked: this.autocrop || null, disabled: !this.consent || null, onchange: e => { this.autocrop = e.target.checked; this.sync(); } }), T(' Автокадрирование по лицу (только у вас)')),
+      h('label', { class: 'row', style: 'min-height:44px' }, h('input', { type: 'checkbox', style: 'width:22px;height:22px', checked: this.secondary || null, onchange: e => { this.secondary = e.target.checked; this.sync(); } }), T(' Сетка и на самовидении')),
+      h('p', { class: 'note', style: 'margin:0', text: T('Сетка и поза по входящему видео построены по сжатому потоку и ориентировочны. Точные измерения выполняются на устройстве пациента.') })));
+    const tabs = Ui.segmented([['metrics', T('Метрики')], ['capture', T('Съёмка')], ['compare', T('Сравнение')], ['report', T('Отчёт')]], this.dTab, t => { this.dTab = t; this.renderDoctor(); }, T('Разделы'));
     const body = h('div', { class: 'stack' });
     box.replaceChildren(head, tabs, body);
     ({ metrics: () => this.tabMetrics(body), capture: () => this.tabCapture(body), compare: () => this.tabCompare(body), report: () => this.tabReport(body) })[this.dTab]();
   },
   req(kind) {
-    if (!this.consent) { Toast.show('Пациент не дал согласие на анализ лица'); return; }
-    Api.ev('control', { action: 'request_measure', kind }).then(() => Toast.show('Запрос отправлен пациенту')).catch(Toast.err);
+    if (!this.consent) { Toast.show(T('Пациент не дал согласие на анализ лица')); return; }
+    Api.ev('control', { action: 'request_measure', kind }).then(() => Toast.show(T('Запрос отправлен пациенту'))).catch(Toast.err);
   },
   tabMetrics(body) {
     const L = this.latest;
-    body.append(h('button', { class: 'btn pri', disabled: !this.consent || null, onclick: () => this.req('symmetry') }, 'Измерить симметрию'),
-      h('div', { class: 'row wrap' }, h('button', { class: 'btn sec', disabled: !this.consent || null, onclick: () => this.req('mobility') }, 'Подвижность'), h('button', { class: 'btn sec', disabled: !this.consent || null, onclick: () => this.req('calibrate') }, 'Калибровка в мм')));
-    if (!this.consent) body.append(h('p', { class: 'note', style: 'margin:0', text: 'Измерения станут доступны, когда пациент даст согласие на анализ лица.' }));
-    if (this.cal || !L.symmetry) body.append(h('p', { class: 'note', style: 'margin:0', text: this.cal ? 'Калибровка: ' + this.cal.label + '; межзрачковое расстояние ' + this.cal.ipd_mm.toFixed(1).replace('.', ',') + ' мм.' : 'Калибровки нет: значения в миллиметрах не показываются.' }));
+    body.append(h('button', { class: 'btn pri', disabled: !this.consent || null, onclick: () => this.req('symmetry') }, T('Измерить симметрию')),
+      h('div', { class: 'row wrap' }, h('button', { class: 'btn sec', disabled: !this.consent || null, onclick: () => this.req('mobility') }, T('Подвижность')), h('button', { class: 'btn sec', disabled: !this.consent || null, onclick: () => this.req('calibrate') }, T('Калибровка в мм'))));
+    if (!this.consent) body.append(h('p', { class: 'note', style: 'margin:0', text: T('Измерения станут доступны, когда пациент даст согласие на анализ лица.') }));
+    if (this.cal || !L.symmetry) body.append(h('p', { class: 'note', style: 'margin:0', text: this.cal ? T('Калибровка: ') + T(this.cal.label) + T('; межзрачковое расстояние ') + this.cal.ipd_mm.toFixed(1).replace('.', DEC) + T(' мм.') : T('Калибровки нет: значения в миллиметрах не показываются.') }));
     if (!L.symmetry && !L.mobility) body.append(this.firstSteps());
-    if (L.symmetry) body.append(h('h3', { text: 'Симметрия' }), this.symDoses(L.symmetry), this.fold('Все значения симметрии', this.symTable(L.symmetry)));
-    else body.append(h('p', { class: 'note', style: 'margin:0', text: 'Метрик симметрии в этом приёме пока нет.' }));
-    if (L.mobility) body.append(h('h3', { text: 'Подвижность' }), this.mobDoses(L.mobility), this.fold('Все значения подвижности', this.mobTable(L.mobility)));
+    if (L.symmetry) body.append(h('h3', { text: T('Симметрия') }), this.symDoses(L.symmetry), this.fold(T('Все значения симметрии'), this.symTable(L.symmetry)));
+    else body.append(h('p', { class: 'note', style: 'margin:0', text: T('Метрик симметрии в этом приёме пока нет.') }));
+    if (L.mobility) body.append(h('h3', { text: T('Подвижность') }), this.mobDoses(L.mobility), this.fold(T('Все значения подвижности'), this.mobTable(L.mobility)));
     body.append(this.repBlock());
-    const chartBox = h('div', { class: 'stack' }); body.append(h('h3', { text: 'Динамика между приёмами' }), chartBox);
+    const chartBox = h('div', { class: 'stack' }); body.append(h('h3', { text: T('Динамика между приёмами') }), chartBox);
     this.loadHistory().then(hist => this.drawTrends(chartBox, hist)).catch(e => chartBox.replaceChildren(h('p', { class: 'note', text: e.message })));
   },
   /* --- проверка повторяемости: серия замеров симметрии подряд --- */
   repNext(d) {
     const R = this.repRun; if (!R || R.done) return;
     R.items.push(d);
-    if (R.items.length >= R.target) { R.done = true; Toast.show('Серия завершена: ' + R.items.length + ' замеров'); return; }
-    Toast.show('Замер ' + R.items.length + ' из ' + R.target + '. Попросите пациента отвернуться и снова сесть прямо');
+    if (R.items.length >= R.target) { R.done = true; Toast.show(T('Серия завершена: ') + R.items.length + T(' замеров')); return; }
+    Toast.show(T('Замер ') + R.items.length + T(' из ') + R.target + T('. Попросите пациента отвернуться и снова сесть прямо'));
     clearTimeout(R.timer); R.timer = setTimeout(() => { if (this.repRun === R && !R.done) this.req('symmetry'); }, 2500);
   },
   repStart(target) { if (!this.consent) { this.req('symmetry'); return; } this.repRun = { target, items: [], done: false, timer: 0 }; this.req('symmetry'); this.renderDoctor(); },
@@ -4541,34 +5397,34 @@ Object.assign(FaceMesh, {
     const R = this.repRun;
     if (!R) {
       let n = 5;
-      return this.fold('Проверка повторяемости',
-        h('p', { class: 'note', style: 'margin:0', text: 'Несколько замеров симметрии подряд у одного человека. Показывает разброс самого измерения и минимальное изменение, которое можно отличить от этого разброса. Между замерами пациент отворачивается и снова садится прямо.' }),
-        Ui.segmented([['3', '3 замера'], ['5', '5'], ['10', '10']], String(n), v => { n = +v; }, 'Число замеров'),
-        h('button', { class: 'btn sec', style: 'align-self:flex-start', disabled: !this.consent || null, onclick: () => this.repStart(n) }, 'Начать серию'));
+      return this.fold(T('Проверка повторяемости'),
+        h('p', { class: 'note', style: 'margin:0', text: T('Несколько замеров симметрии подряд у одного человека. Показывает разброс самого измерения и минимальное изменение, которое можно отличить от этого разброса. Между замерами пациент отворачивается и снова садится прямо.') }),
+        Ui.segmented([['3', T('3 замера')], ['5', '5'], ['10', '10']], String(n), v => { n = +v; }, T('Число замеров')),
+        h('button', { class: 'btn sec', style: 'align-self:flex-start', disabled: !this.consent || null, onclick: () => this.repStart(n) }, T('Начать серию')));
     }
-    if (!R.done) return h('div', { class: 'steps', role: 'status', 'aria-live': 'polite' }, h('h3', { text: 'Проверка повторяемости' }),
-      h('p', { style: 'margin:8px 0', text: 'Получено замеров: ' + R.items.length + ' из ' + R.target + '. Следующий запрос уйдёт пациенту автоматически.' }),
+    if (!R.done) return h('div', { class: 'steps', role: 'status', 'aria-live': 'polite' }, h('h3', { text: T('Проверка повторяемости') }),
+      h('p', { style: 'margin:8px 0', text: T('Получено замеров: ') + R.items.length + T(' из ') + R.target + T('. Следующий запрос уйдёт пациенту автоматически.') }),
       h('div', { class: 'meter' }, h('i', { style: 'width:' + Math.round(R.items.length / R.target * 100) + '%' })),
-      h('button', { class: 'btn txt', style: 'margin-top:8px;padding:0', onclick: () => this.repStop() }, 'Остановить серию'));
-    const st = this.Repeat.stats(R.items), d = st.mm ? 2 : 3, u = st.mm ? ' мм' : '', f = v => v == null ? '-' : fx(v, d).replace('.', ',');
-    return h('div', { class: 'steps' }, h('h3', { text: 'Повторяемость: ' + st.n + ' замеров' }),
-      h('table', { class: 'tb', style: 'margin-top:8px' }, h('tr', null, h('th', { text: 'Метрика' }), h('th', { class: 'n', text: 'Разность: среднее ± SD' }), h('th', { class: 'n', text: 'MDC95' })),
-        st.rows.map(r => h('tr', null, h('td', { text: r.label }), h('td', { class: 'n', text: f(r.diff.mean) + ' ± ' + f(r.diff.sd) + u }), h('td', { class: 'n', text: f(r.diff.mdc) + u })))),
-      h('p', { class: 'note', style: 'margin:8px 0 0', text: 'SD — разброс замеров у одного человека. MDC95 — минимальное различимое изменение: если между приёмами разность изменилась меньше, это не отличить от разброса измерения. ' + (st.mm ? 'Все замеры откалиброваны, значения в миллиметрах.' : 'Значения в долях МЗР: для миллиметров нужна калибровка перед серией.') }),
+      h('button', { class: 'btn txt', style: 'margin-top:8px;padding:0', onclick: () => this.repStop() }, T('Остановить серию')));
+    const st = this.Repeat.stats(R.items), d = st.mm ? 2 : 3, u = st.mm ? T(' мм') : '', f = v => v == null ? '-' : fx(v, d).replace('.', DEC);
+    return h('div', { class: 'steps' }, h('h3', { text: T('Повторяемость: ') + st.n + T(' замеров') }),
+      h('table', { class: 'tb', style: 'margin-top:8px' }, h('tr', null, h('th', { text: T('Метрика') }), h('th', { class: 'n', text: T('Разность: среднее ± SD') }), h('th', { class: 'n', text: 'MDC95' })),
+        st.rows.map(r => h('tr', null, h('td', { text: T(r.label) }), h('td', { class: 'n', text: f(r.diff.mean) + ' ± ' + f(r.diff.sd) + u }), h('td', { class: 'n', text: f(r.diff.mdc) + u })))),
+      h('p', { class: 'note', style: 'margin:8px 0 0', text: T('SD — разброс замеров у одного человека. MDC95 — минимальное различимое изменение: если между приёмами разность изменилась меньше, это не отличить от разброса измерения. ') + (st.mm ? T('Все замеры откалиброваны, значения в миллиметрах.') : T('Значения в долях МЗР: для миллиметров нужна калибровка перед серией.')) }),
       h('div', { class: 'row wrap', style: 'margin-top:8px' },
-        h('button', { class: 'btn sec', onclick: () => Ui.download('повторяемость-' + new Date().toISOString().slice(0, 10) + '.csv', '\ufeff' + this.Repeat.csv(R.items), 'text/csv') }, icon('download'), 'Таблица (CSV)'),
-        h('button', { class: 'btn txt', onclick: () => this.repStop() }, 'Новая серия')));
+        h('button', { class: 'btn sec', onclick: () => Ui.download(T('повторяемость-') + new Date().toISOString().slice(0, 10) + '.csv', '\ufeff' + this.Repeat.csv(R.items), 'text/csv') }, icon('download'), T('Таблица (CSV)')),
+        h('button', { class: 'btn txt', onclick: () => this.repStop() }, T('Новая серия'))));
   },
   /* порядок документирования лица для врача, который делает это впервые */
   firstSteps() {
     const steps = [
-      ['Пациент даёт согласие на анализ лица', this.consent],
-      ['«Измерить симметрию»: пациент держит голову прямо, числа приходят сюда', false],
-      ['«Калибровка в мм» — если нужны миллиметры, а не доли МЗР', !!this.cal],
-      ['«Подвижность» и снимки по ракурсам (раздел «Съёмка») — по необходимости', false],
-      ['Раздел «Отчёт»: печать или PDF с числами, снимками и динамикой', false]];
-    return h('div', { class: 'steps' }, h('h3', { text: 'Порядок документирования' }),
-      h('ol', null, steps.map(([t, done]) => h('li', { class: done ? 'done' : null }, t, done ? h('span', { class: 'chip g', text: 'готово' }) : null))));
+      [T('Пациент даёт согласие на анализ лица'), this.consent],
+      [T('«Измерить симметрию»: пациент держит голову прямо, числа приходят сюда'), false],
+      [T('«Калибровка в мм» — если нужны миллиметры, а не доли МЗР'), !!this.cal],
+      [T('«Подвижность» и снимки по ракурсам (раздел «Съёмка») — по необходимости'), false],
+      [T('Раздел «Отчёт»: печать или PDF с числами, снимками и динамикой'), false]];
+    return h('div', { class: 'steps' }, h('h3', { text: T('Порядок документирования') }),
+      h('ol', null, steps.map(([t, done]) => h('li', { class: done ? 'done' : null }, t, done ? h('span', { class: 'chip g', text: T('готово') }) : null))));
   },
   /* ряды по приёмам: последнее измерение каждого приёма */
   series(hist, kind, pick) {
@@ -4579,21 +5435,21 @@ Object.assign(FaceMesh, {
   },
   drawTrends(box, hist, forPrint) {
     const cvs = [];
-    const symDefs = [['half', 'Ширина половин лица: разность'], ['brow', 'Высота бровей: разность'], ['mcor', 'Уголки рта: разность высот'], ['mouth', 'Уголки рта до средней линии: разность']];
+    const symDefs = [['half', T('Ширина половин лица: разность')], ['brow', T('Высота бровей: разность')], ['mcor', T('Уголки рта: разность высот')], ['mouth', T('Уголки рта до средней линии: разность')]];
     for (const [id, title] of symDefs) {
       const s = this.series(hist, 'symmetry', d => { const r = (d.rows || []).find(x => x.id === id); return r ? r.diff : null; });
-      cvs.push([title + ' (доли МЗР)', [{ name: 'правая минус левая', points: s }], [-0.1, 0.1]]);
+      cvs.push([title + T(' (доли МЗР)'), [{ name: T('правая минус левая'), points: s }], [-0.1, 0.1]]);
     }
-    const s1 = this.series(hist, 'symmetry', d => { const r = (d.singles || []).find(x => x.id === 'tilt'); return r ? r.value : null; }); cvs.push(['Наклон линии глаз (градусы)', [{ name: 'наклон', points: s1 }], [-5, 5]]);
+    const s1 = this.series(hist, 'symmetry', d => { const r = (d.singles || []).find(x => x.id === 'tilt'); return r ? r.value : null; }); cvs.push([T('Наклон линии глаз (градусы)'), [{ name: T('наклон'), points: s1 }], [-5, 5]]);
     const mob = id => this.series(hist, 'mobility', d => { const t = (d.tasks || []).find(x => x.id === id); return t && t.ratio != null ? t.ratio : null; });
-    cvs.push(['Подвижность: соотношение сторон', [{ name: 'улыбка', points: mob('smile') }, { name: 'брови', points: mob('brow') }, { name: 'глаза', points: mob('eye') }, { name: 'губы', points: mob('lips') }], [0, 1]]);
+    cvs.push([T('Подвижность: соотношение сторон'), [{ name: T('улыбка'), points: mob('smile') }, { name: T('брови'), points: mob('brow') }, { name: T('глаза'), points: mob('eye') }, { name: T('губы'), points: mob('lips') }], [0, 1]]);
     const nodes = []; const urls = [];
     for (const [title, ser, fixed] of cvs) {
       if (!ser.some(s => s.points.length)) continue;
       const cv = h('canvas', { style: 'width:100%;height:auto', 'aria-label': title }); this.Chart.line(cv, ser, { title, print: forPrint, fixed });
       nodes.push(cv); urls.push({ title, url: cv.toDataURL('image/png') });
     }
-    if (box) box.replaceChildren(...(nodes.length ? nodes : [h('p', { class: 'note', style: 'margin:0', text: 'Данных по предыдущим приёмам пока нет. Графики появятся после нескольких измерений.' })]));
+    if (box) box.replaceChildren(...(nodes.length ? nodes : [h('p', { class: 'note', style: 'margin:0', text: T('Данных по предыдущим приёмам пока нет. Графики появятся после нескольких измерений.') })]));
     return urls;
   },
   tabCapture(body) {
@@ -4601,35 +5457,35 @@ Object.assign(FaceMesh, {
     const boxes = names.map(n => h('input', { type: 'checkbox', style: 'width:22px;height:22px', checked: this.poses.includes(n) || null, 'data-p': n }));
     const tol = Ui.input('number', '5', this.tol); tol.min = 1; tol.max = 15; tol.step = 0.5;
     const save = async () => {
-      const poses = boxes.filter(b => b.checked).map(b => b.dataset.p); if (!poses.length) { Toast.err('Выберите хотя бы один ракурс'); return; }
+      const poses = boxes.filter(b => b.checked).map(b => b.dataset.p); if (!poses.length) { Toast.err(T('Выберите хотя бы один ракурс')); return; }
       const t = clamp(parseFloat(tol.value) || 5, 1, 15);
-      try { await Api.post('/rooms/' + Api.room + '/protocol', { face: { poses, tolerance: t } }); this.poses = poses; this.tol = t; await Api.ev('control', { action: 'set_face', poses, tolerance: t }); Toast.show('Набор ракурсов сохранён и отправлен пациенту'); } catch (e) { Toast.err(e); }
+      try { await Api.post('/rooms/' + Api.room + '/protocol', { face: { poses, tolerance: t } }); this.poses = poses; this.tol = t; await Api.ev('control', { action: 'set_face', poses, tolerance: t }); Toast.show(T('Набор ракурсов сохранён и отправлен пациенту')); } catch (e) { Toast.err(e); }
     };
-    body.append(h('h3', { text: 'Набор ракурсов' }), h('div', { class: 'list' }, names.map((n, i) => h('label', { class: 'li' }, boxes[i], h('span', { class: 'grow', text: POSE_NAMES[n] })))),
-      Ui.field('Допуск по углам, градусы (анфас: 5)', tol), h('button', { class: 'btn sec', onclick: save }, 'Сохранить набор'),
-      h('button', { class: 'btn pri', onclick: () => this.req('capture') }, icon('camera'), 'Запросить съёмку у пациента'),
-      h('h3', { text: 'Снимки этого приёма' }));
-    if (!this.photos.length) body.append(h('p', { class: 'note', style: 'margin:0', text: 'Снимков пока нет.' }));
-    else body.append(h('div', { class: 'thumbs' }, this.photos.map(p => { const f = this.thumbEl(p); f.append(h('button', { class: 'btn txt', style: 'min-height:32px;padding:0', onclick: () => { Api.ev('control', { action: 'request_retake', pose: p.pose }).then(() => Toast.show('Запрос на повторный снимок отправлен')).catch(Toast.err); } }, 'Повторить')); return f; })));
+    body.append(h('h3', { text: T('Набор ракурсов') }), h('div', { class: 'list' }, names.map((n, i) => h('label', { class: 'li' }, boxes[i], h('span', { class: 'grow', text: POSE_NAMES[n] })))),
+      Ui.field(T('Допуск по углам, градусы (анфас: 5)'), tol), h('button', { class: 'btn sec', onclick: save }, T('Сохранить набор')),
+      h('button', { class: 'btn pri', onclick: () => this.req('capture') }, icon('camera'), T('Запросить съёмку у пациента')),
+      h('h3', { text: T('Снимки этого приёма') }));
+    if (!this.photos.length) body.append(h('p', { class: 'note', style: 'margin:0', text: T('Снимков пока нет.') }));
+    else body.append(h('div', { class: 'thumbs' }, this.photos.map(p => { const f = this.thumbEl(p); f.append(h('button', { class: 'btn txt', style: 'min-height:32px;padding:0', onclick: () => { Api.ev('control', { action: 'request_retake', pose: p.pose }).then(() => Toast.show(T('Запрос на повторный снимок отправлен'))).catch(Toast.err); } }, T('Повторить'))); return f; })));
   },
   tabCompare(body) {
     const wrap = h('div', { class: 'stack' }); body.append(wrap, h('div', { class: 'sk', style: 'height:48px' }));
     this.loadPhotos().then(all => {
       body.replaceChildren(wrap);
       const poses = [...new Set(all.map(p => p.pose))].filter(p => all.filter(x => x.pose === p).length >= 2);
-      if (!poses.length) { wrap.replaceChildren(h('h3', { text: 'Сравнение до и после' }), h('p', { class: 'note', style: 'margin:0', text: 'Нужно минимум два снимка одного ракурса одного пациента.' })); return; }
+      if (!poses.length) { wrap.replaceChildren(h('h3', { text: T('Сравнение до и после') }), h('p', { class: 'note', style: 'margin:0', text: T('Нужно минимум два снимка одного ракурса одного пациента.') })); return; }
       if (!poses.includes(this.cmp.pose)) this.cmp = { pose: poses[0], before: null, after: null };
       const list = all.filter(p => p.pose === this.cmp.pose).sort((a, b) => a.ts - b.ts);
       const sel = (p) => { if (!this.cmp.before || (this.cmp.before && this.cmp.after)) { this.cmp.before = p; this.cmp.after = null; } else this.cmp.after = p; this.renderDoctor(); };
-      wrap.replaceChildren(h('h3', { text: 'Сравнение до и после' }), Ui.segmented(poses.map(p => [p, POSE_NAMES[p] || p]), this.cmp.pose, p => { this.cmp = { pose: p, before: null, after: null }; this.renderDoctor(); }, 'Ракурс'),
-        h('p', { class: 'note', style: 'margin:0', text: 'Нажмите снимок «до», затем снимок «после».' + (this.cmp.before ? ' До: ' + fmtDT(this.cmp.before.ts) + '.' : '') + (this.cmp.after ? ' После: ' + fmtDT(this.cmp.after.ts) + '.' : '') }),
+      wrap.replaceChildren(h('h3', { text: T('Сравнение до и после') }), Ui.segmented(poses.map(p => [p, POSE_NAMES[p] || p]), this.cmp.pose, p => { this.cmp = { pose: p, before: null, after: null }; this.renderDoctor(); }, T('Ракурс')),
+        h('p', { class: 'note', style: 'margin:0', text: T('Нажмите снимок «до», затем снимок «после».') + (this.cmp.before ? T(' До: ') + fmtDT(this.cmp.before.ts) + '.' : '') + (this.cmp.after ? T(' После: ') + fmtDT(this.cmp.after.ts) + '.' : '') }),
         h('div', { class: 'thumbs' }, list.map(p => { const f = this.thumbEl(p, () => sel(p)); if ((this.cmp.before && this.cmp.before.id === p.id) || (this.cmp.after && this.cmp.after.id === p.id)) f.firstChild.classList.add('sel'); return f; })),
-        h('button', { class: 'btn pri', disabled: !(this.cmp.before && this.cmp.after) || null, onclick: () => this.Compare.open(this.cmp.before, this.cmp.after, this.cmp.pose) }, icon('video2'), 'Сравнить'));
+        h('button', { class: 'btn pri', disabled: !(this.cmp.before && this.cmp.after) || null, onclick: () => this.Compare.open(this.cmp.before, this.cmp.after, this.cmp.pose) }, icon('video2'), T('Сравнить')));
     }).catch(e => { body.replaceChildren(h('p', { text: e.message })); });
   },
   tabReport(body) {
     const out = h('div', { class: 'stack' });
-    body.append(h('button', { class: 'btn pri', onclick: async e => { e.target.disabled = true; try { await this.Report.make(out); } catch (x) { Toast.err(x); } e.target.disabled = false; } }, icon('doc'), 'Сформировать отчёт'), out);
+    body.append(h('button', { class: 'btn pri', onclick: async e => { e.target.disabled = true; try { await this.Report.make(out); } catch (x) { Toast.err(x); } e.target.disabled = false; } }, icon('doc'), T('Сформировать отчёт')), out);
     if (this.lastReport) this.Report.show(out, this.lastReport);
   }
 });
@@ -4668,11 +5524,11 @@ FaceMesh.Chart = {
 /* ===== Face Mesh: стандартизованная съёмка (пациент) ===== */
 FaceMesh.Capture = {
   TEXT: {
-    frontal: 'Смотрите прямо в камеру',
-    left45: 'Поверните голову к левому плечу на 45 градусов',
-    right45: 'Поверните голову к правому плечу на 45 градусов',
-    left90: 'Профиль: поверните голову к левому плечу на 90 градусов',
-    right90: 'Профиль: поверните голову к правому плечу на 90 градусов'
+    frontal: T('Смотрите прямо в камеру'),
+    left45: T('Поверните голову к левому плечу на 45 градусов'),
+    right45: T('Поверните голову к правому плечу на 45 градусов'),
+    left90: T('Профиль: поверните голову к левому плечу на 90 градусов'),
+    right90: T('Профиль: поверните голову к правому плечу на 90 градусов')
   },
   /* кодирование JPEG не больше лимита сервера (5 МБ) */
   async encode(cv) {
@@ -4684,17 +5540,17 @@ FaceMesh.Capture = {
       if (q > 0.6) q -= 0.1;
       else { const n = document.createElement('canvas'); n.width = Math.round(c.width * 0.8); n.height = Math.round(c.height * 0.8); n.getContext('2d').drawImage(c, 0, 0, n.width, n.height); c = n; }
     }
-    throw new Error('Не удалось уменьшить снимок до допустимого размера');
+    throw new Error(T('Не удалось уменьшить снимок до допустимого размера'));
   },
   /* снимок текущего кадра в полном разрешении видеоэлемента, без зеркала */
   grab(video, cur, hide, mesh) {
     const vw = video.videoWidth, vh = video.videoHeight;
-    if (!vw || !vh) throw new Error('Камера не готова');
+    if (!vw || !vh) throw new Error(T('Камера не готова'));
     const cv = document.createElement('canvas'); cv.width = vw; cv.height = vh;
     const ctx = cv.getContext('2d'); ctx.drawImage(video, 0, 0, vw, vh);
     const fresh = cur && performance.now() - cur.t < 700 && cur.vw === vw && cur.vh === vh;
     if (hide) {
-      if (!fresh) throw new Error('Лицо не найдено в кадре: скрыть его перед сохранением невозможно. Снимок не сделан.');
+      if (!fresh) throw new Error(T('Лицо не найдено в кадре: скрыть его перед сохранением невозможно. Снимок не сделан.'));
       FaceMesh.Privacy.hide(ctx, cur, vw, vh);
     } else if (mesh && fresh) {
       const k = Math.max(1, vw / 640);
@@ -4705,7 +5561,7 @@ FaceMesh.Capture = {
   async open(poses) {
     const F = FaceMesh;
     if (!(await F.ensureConsent())) return;
-    if (!Media.stream || !Media.cam) { Toast.err('Для съёмки нужна включённая камера'); return; }
+    if (!Media.stream || !Media.cam) { Toast.err(T('Для съёмки нужна включённая камера')); return; }
     const list = (poses && poses.length ? poses : ['frontal']).slice();
     F.busy++; await F.sync();
     if (!F.trk) { F.busy = Math.max(0, F.busy - 1); return; }
@@ -4719,11 +5575,11 @@ FaceMesh.Capture = {
     const prog = h('progress', { max: 1, value: 0, style: 'width:100%;height:12px' });
     const btns = h('div', { class: 'row wrap', style: 'justify-content:center' });
     const opts = h('div', { class: 'stack' },
-      h('label', { class: 'row', style: 'min-height:44px' }, h('input', { type: 'checkbox', style: 'width:22px;height:22px', checked: F.hideFace || null, onchange: e => { F.hideFace = e.target.checked; mesh.disabled = F.hideFace; } }), ' Скрыть лицо (пикселизация до отправки)'));
+      h('label', { class: 'row', style: 'min-height:44px' }, h('input', { type: 'checkbox', style: 'width:22px;height:22px', checked: F.hideFace || null, onchange: e => { F.hideFace = e.target.checked; mesh.disabled = F.hideFace; } }), T(' Скрыть лицо (пикселизация до отправки)')));
     const mesh = h('input', { type: 'checkbox', style: 'width:22px;height:22px', checked: F.meshOnShot || null, disabled: F.hideFace || null, onchange: e => { F.meshOnShot = e.target.checked; } });
-    opts.append(h('label', { class: 'row', style: 'min-height:44px' }, mesh, ' Наложить контуры на снимок'));
+    opts.append(h('label', { class: 'row', style: 'min-height:44px' }, mesh, T(' Наложить контуры на снимок')));
     const s = Ui.sheet({
-      title: 'Фотосъёмка по ракурсам', wide: true, onClose: async () => {
+      title: T('Фотосъёмка по ракурсам'), wide: true, onClose: async () => {
         if (closed) return; closed = true; stepToken++; if (hl) Loop.del(hl); F.subs.delete(onCur);
         F.busy = Math.max(0, F.busy - 1); await Media.restore720(); F.sync();
       }
@@ -4737,9 +5593,9 @@ FaceMesh.Capture = {
       const ey = e.yaw - tgt;
       const ok = Math.abs(ey) <= tol && Math.abs(e.pitch) <= tol && Math.abs(e.roll) <= tol;
       let hint = '';
-      if (Math.abs(ey) > tol) hint = ey < 0 ? 'Поверните голову ещё левее (к левому плечу)' : 'Поверните голову ещё правее (к правому плечу)';
-      else if (Math.abs(e.pitch) > tol) hint = e.pitch > 0 ? 'Опустите подбородок' : 'Приподнимите подбородок';
-      else if (Math.abs(e.roll) > tol) hint = 'Не наклоняйте голову к плечу';
+      if (Math.abs(ey) > tol) hint = ey < 0 ? T('Поверните голову ещё левее (к левому плечу)') : T('Поверните голову ещё правее (к правому плечу)');
+      else if (Math.abs(e.pitch) > tol) hint = e.pitch > 0 ? T('Опустите подбородок') : T('Приподнимите подбородок');
+      else if (Math.abs(e.roll) > tol) hint = T('Не наклоняйте голову к плечу');
       return { ok, hint, e, ey };
     };
     const manualOnly = () => Math.abs(POSE_YAW[pose()]) > 60;
@@ -4754,18 +5610,18 @@ FaceMesh.Capture = {
         if (!state.since) state.since = now;
         const held = now - state.since;
         if (held >= 1000 && !state.counting) countdown(true);
-        else if (!state.counting) { title.textContent = 'Держите позу'; prog.value = Math.min(1, held / 1000); }
+        else if (!state.counting) { title.textContent = T('Держите позу'); prog.value = Math.min(1, held / 1000); }
       } else {
         state.since = 0; prog.value = 0;
         if (state.counting) { state.cancel = true; }
-        if (!state.counting) title.textContent = info && info.hint && (!r.hint) ? info.hint : (r.hint || 'Выровняйте голову');
+        if (!state.counting) title.textContent = info && info.hint && (!r.hint) ? info.hint : (r.hint || T('Выровняйте голову'));
       }
     };
     F.subs.add(onCur);
     const countdown = async auto => {
       if (state.counting) return; state.counting = true; state.cancel = false; const tok = stepToken;
       for (let n = 3; n >= 1; n--) {
-        count.textContent = String(n); title.textContent = 'Не двигайтесь';
+        count.textContent = String(n); title.textContent = T('Не двигайтесь');
         for (let t = 0; t < 10; t++) { await sleep(100); if (closed || tok !== stepToken) { count.textContent = ''; return; } if (auto && state.cancel) { state.counting = false; state.since = 0; count.textContent = ''; return; } }
       }
       count.textContent = '';
@@ -4795,12 +5651,12 @@ FaceMesh.Capture = {
       stepToken++; state = { since: 0, counting: false, cancel: false, busy: false, last: null };
       const p = pose(); prog.value = 0; count.textContent = '';
       title.textContent = F.Capture.TEXT[p];
-      sub.textContent = 'Ракурс ' + (idx + 1) + ' из ' + list.length + ': ' + POSE_NAMES[p] + (manualOnly() ? '. Профиль 90 градусов система не отслеживает: снимок делается вручную.' : '. Снимок сделается сам после удержания позы в допуске ' + F.tol + ' градусов.');
+      sub.textContent = T('Ракурс ') + (idx + 1) + T(' из ') + list.length + ': ' + POSE_NAMES[p] + (manualOnly() ? T('. Профиль 90 градусов система не отслеживает: снимок делается вручную.') : T('. Снимок сделается сам после удержания позы в допуске ') + F.tol + T(' градусов.'));
       btns.replaceChildren(
-        h('button', { class: 'btn pri lg', onclick: () => { if (!state.busy) { state.since = 0; countdown(false); } } }, icon('camera'), 'Снять сейчас'),
-        h('button', { class: 'btn sec', onclick: () => next() }, 'Пропустить ракурс'));
+        h('button', { class: 'btn pri lg', onclick: () => { if (!state.busy) { state.since = 0; countdown(false); } } }, icon('camera'), T('Снять сейчас')),
+        h('button', { class: 'btn sec', onclick: () => next() }, T('Пропустить ракурс')));
     };
-    const next = () => { idx++; if (idx >= list.length) { title.textContent = 'Съёмка завершена'; sub.textContent = ''; prog.value = 1; btns.replaceChildren(h('button', { class: 'btn pri lg', onclick: () => s.close() }, 'Готово')); state = null; stepToken++; return; } showStep(); };
+    const next = () => { idx++; if (idx >= list.length) { title.textContent = T('Съёмка завершена'); sub.textContent = ''; prog.value = 1; btns.replaceChildren(h('button', { class: 'btn pri lg', onclick: () => s.close() }, T('Готово'))); state = null; stepToken++; return; } showStep(); };
     const shoot = async () => {
       if (!state || state.busy) return; state.busy = true; const tok = stepToken;
       try {
@@ -4810,9 +5666,9 @@ FaceMesh.Capture = {
         const blob = await this.encode(cv);
         if (closed || tok !== stepToken) return;
         const url = URL.createObjectURL(blob);
-        const warn = (!manualOnly() && e && !(Math.abs(e.yaw - tgt) <= F.tol && Math.abs(e.pitch) <= F.tol && Math.abs(e.roll) <= F.tol)) ? 'Поза в момент снимка вне допуска. Лучше переснять.' : '';
-        title.textContent = 'Проверьте снимок'; sub.textContent = warn || (F.hideFace ? 'Лицо скрыто пикселизацией: такой снимок нельзя использовать для сравнения.' : 'Нажмите «Отправить», если всё в порядке.');
-        const img = h('img', { src: url, alt: 'Снимок', style: 'position:absolute;inset:0;width:100%;height:100%;object-fit:contain;background:#000' });
+        const warn = (!manualOnly() && e && !(Math.abs(e.yaw - tgt) <= F.tol && Math.abs(e.pitch) <= F.tol && Math.abs(e.roll) <= F.tol)) ? T('Поза в момент снимка вне допуска. Лучше переснять.') : '';
+        title.textContent = T('Проверьте снимок'); sub.textContent = warn || (F.hideFace ? T('Лицо скрыто пикселизацией: такой снимок нельзя использовать для сравнения.') : T('Нажмите «Отправить», если всё в порядке.'));
+        const img = h('img', { src: url, alt: T('Снимок'), style: 'position:absolute;inset:0;width:100%;height:100%;object-fit:contain;background:#000' });
         stage.append(img);
         const done = () => { img.remove(); URL.revokeObjectURL(url); };
         btns.replaceChildren(
@@ -4820,11 +5676,11 @@ FaceMesh.Capture = {
             ev.target.disabled = true;
             try {
               await Api.req('POST', '/rooms/' + Api.room + '/frames', { raw: blob, headers: { 'Content-Type': 'image/jpeg', 'X-Pose': pose() } });
-              Toast.show('Снимок отправлен врачу'); done(); next();
+              Toast.show(T('Снимок отправлен врачу')); done(); next();
             } catch (er) { Toast.err(er); ev.target.disabled = false; }
-          } }, 'Отправить'),
-          h('button', { class: 'btn sec', onclick: () => { done(); showStep(); } }, 'Переснять'),
-          h('button', { class: 'btn txt', onclick: () => { done(); next(); } }, 'Пропустить'));
+          } }, T('Отправить')),
+          h('button', { class: 'btn sec', onclick: () => { done(); showStep(); } }, T('Переснять')),
+          h('button', { class: 'btn txt', onclick: () => { done(); next(); } }, T('Пропустить')));
         state.busy = true;
       } catch (er) { Toast.err(er); if (state) { state.busy = false; state.since = 0; state.counting = false; } }
     };
@@ -4837,7 +5693,7 @@ FaceMesh.Capture = {
 FaceMesh.Compare = {
   l: null,
   RIGID: [33, 133, 362, 263, 6, 1, 168, 10],
-  POINTS: [[105, 'Правая бровь'], [334, 'Левая бровь'], [33, 'Правый внешний угол глаза'], [263, 'Левый внешний угол глаза'], [1, 'Кончик носа'], [61, 'Правый угол рта'], [291, 'Левый угол рта'], [152, 'Подбородок']],
+  POINTS: [[105, T('Правая бровь')], [334, T('Левая бровь')], [33, T('Правый внешний угол глаза')], [263, T('Левый внешний угол глаза')], [1, T('Кончик носа')], [61, T('Правый угол рта')], [291, T('Левый угол рта')], [152, T('Подбородок')]],
   async load(photo) {
     const url = await FaceMesh.thumb(photo.id);
     const img = new Image(); img.src = url; await img.decode();
@@ -4860,13 +5716,13 @@ FaceMesh.Compare = {
     const c = re / den, d = im / den;
     return { c, d, tx: ca.x - (c * cb.x - d * cb.y), ty: ca.y - (d * cb.x + c * cb.y), scale: Math.hypot(c, d), angle: deg(Math.atan2(d, c)) };
   },
-  apply(T, x, y) { return { x: T.c * x - T.d * y + T.tx, y: T.d * x + T.c * y + T.ty }; },
+  apply(TR, x, y) { return { x: TR.c * x - TR.d * y + TR.tx, y: TR.d * x + TR.c * y + TR.ty }; },
   async open(before, after, pose) {
     const F = FaceMesh, self = this;
     if (F.unavailable) { Toast.show(F.unavailable); return; }
     let closed = false;
-    const body = h('div', { class: 'stack' }, h('div', { class: 'sk', style: 'height:120px' }), h('p', { class: 'note', style: 'margin:0', text: 'Обработка снимков на вашем устройстве...' }));
-    const s = Ui.sheet({ title: 'Сравнение: ' + (POSE_NAMES[pose] || pose), wide: true, onClose: () => { closed = true; if (self.l) { try { self.l.close(); } catch (e) { /* ignore */ } self.l = null; } } });
+    const body = h('div', { class: 'stack' }, h('div', { class: 'sk', style: 'height:120px' }), h('p', { class: 'note', style: 'margin:0', text: T('Обработка снимков на вашем устройстве...') }));
+    const s = Ui.sheet({ title: T('Сравнение: ') + (POSE_NAMES[pose] || pose), wide: true, onClose: () => { closed = true; if (self.l) { try { self.l.close(); } catch (e) { /* ignore */ } self.l = null; } } });
     s.el.append(body);
     try {
       const [ia, ib] = await Promise.all([this.load(before), this.load(after)]);
@@ -4876,13 +5732,13 @@ FaceMesh.Compare = {
       const A = this.detect(ia), B = this.detect(ib);
       try { this.l.close(); } catch (e) { /* ignore */ } this.l = null;
       if (closed) return;
-      if (!A || !B) { body.replaceChildren(h('p', { text: 'Лицо не найдено на ' + (!A && !B ? 'обоих снимках' : (!A ? 'снимке «до»' : 'снимке «после»')) + '. Если снимок был сохранён со скрытым лицом, сравнить его нельзя.' })); return; }
+      if (!A || !B) { body.replaceChildren(h('p', { text: T('Лицо не найдено на ') + (!A && !B ? T('обоих снимках') : (!A ? T('снимке «до»') : T('снимке «после»'))) + T('. Если снимок был сохранён со скрытым лицом, сравнить его нельзя.') })); return; }
       const loc = this.calc(A, B, pose, F.tol, F.cal), side = (X, p) => ({ id: p.id, ts: p.ts, frame: F.Remote.pack(X, this.IDX, []) });
       const R = await F.Remote.pick('compare', { before: side(A, before), after: side(B, after), pose, tolerance: F.tol, calibration: F.cal }, loc, null,
-        'Анализ временно недоступен, снимок сохранён и будет обработан позже. Сейчас показан расчёт на этом устройстве');
+        T('Анализ временно недоступен, снимок сохранён и будет обработан позже. Сейчас показан расчёт на этом устройстве'));
       if (closed) return;
       this.show(body, s, ia, ib, R, before, after, pose);
-    } catch (e) { console.error(e); if (!closed) body.replaceChildren(h('p', { text: 'Не удалось выполнить сравнение: ' + ((e && e.message) || 'ошибка') })); }
+    } catch (e) { console.error(e); if (!closed) body.replaceChildren(h('p', { text: T('Не удалось выполнить сравнение: ') + ((e && e.message) || T('ошибка')) })); }
   },
   IDX: [33, 133, 362, 263, 6, 1, 168, 10, 105, 334, 61, 291, 152, 468, 473],
   /* расчёт сравнения по точкам двух снимков; тот же результат отдаёт сервис vision (/v1/compare) */
@@ -4891,23 +5747,23 @@ FaceMesh.Compare = {
     /* с учётом направления поворота: снимок «влево 45°», снятый вправо, не проходит */
     const chk = X => { const e = F.Pose.eulerStill(X); if (!e) return { ok: false, e: null }; const dy = Math.abs(e.yaw - tgt); return { ok: dy <= tol && Math.abs(e.pitch) <= tol && Math.abs(e.roll) <= tol, e }; };
     const ca = chk(A), cb = chk(B), poseOk = ca.ok && cb.ok && !!A.mat && !!B.mat;
-    const T = this.procrustes(A, B);
+    const TR = this.procrustes(A, B);
     /* нормировка: по МЗР для анфаса, по высоте лица для остальных ракурсов */
     const dist = (X, i, j) => Math.hypot((X.lm[i].x - X.lm[j].x) * X.vw, (X.lm[i].y - X.lm[j].y) * X.vh);
     const normName = pose === 'frontal' ? 'ipd' : 'face_height', norm = normName === 'ipd' ? dist(A, 468, 473) : dist(A, 10, 152);
     const rows = this.POINTS.map(([i, label]) => {
-      const pa = { x: A.lm[i].x * A.vw, y: A.lm[i].y * A.vh }, pb = this.apply(T, B.lm[i].x * B.vw, B.lm[i].y * B.vh);
+      const pa = { x: A.lm[i].x * A.vw, y: A.lm[i].y * A.vh }, pb = this.apply(TR, B.lm[i].x * B.vw, B.lm[i].y * B.vh);
       const dx = (pb.x - pa.x) / norm, dy = (pb.y - pa.y) / norm;
       const o = { id: i, label, dx, dy, px: pa.x, py: pa.y, qx: pb.x, qy: pb.y };
       if (mm) { o.dx_mm = dx * mm.ipd_mm; o.dy_mm = dy * mm.ipd_mm; }
       return o;
     });
-    return { kind: 'compare', pose, tolerance: tol, T, rows, ca, cb, pose_ok: poseOk, norm: normName, mm, multi: [!!A.multi, !!B.multi] };
+    return { kind: 'compare', pose, tolerance: tol, T: TR, rows, ca, cb, pose_ok: poseOk, norm: normName, mm, multi: [!!A.multi, !!B.multi] };
   },
   show(body, sheet, ia, ib, R, before, after, pose) {
     const F = FaceMesh, tol = R.tolerance, mm = R.mm, T = R.T, rows = R.rows, ca = R.ca, cb = R.cb, poseOk = R.pose_ok, normName = R.norm;
     const W = ia.naturalWidth, H = ia.naturalHeight;
-    const cv = document.createElement('canvas'); cv.width = W; cv.height = H; cv.setAttribute('aria-label', 'Сравнение снимков до и после');
+    const cv = document.createElement('canvas'); cv.width = W; cv.height = H; cv.setAttribute('aria-label', T('Сравнение снимков до и после'));
     const ctx = cv.getContext('2d');
     const st = { mode: 'wipe', pos: 50, arrows: true };
     const render = () => {
@@ -4930,30 +5786,30 @@ FaceMesh.Compare = {
         }
       }
     };
-    const slider = h('input', { type: 'range', min: 0, max: 100, value: 50, style: 'width:100%', 'aria-label': 'Положение шторки или прозрачность', oninput: e => { st.pos = +e.target.value; render(); } });
-    const unit = normName === 'ipd' ? (mm ? 'мм' : 'доли МЗР') : 'доли высоты лица';
+    const slider = h('input', { type: 'range', min: 0, max: 100, value: 50, style: 'width:100%', 'aria-label': T('Положение шторки или прозрачность'), oninput: e => { st.pos = +e.target.value; render(); } });
+    const unit = normName === 'ipd' ? (mm ? T('мм') : T('доли МЗР')) : T('доли высоты лица');
     const f = v => v == null ? '-' : (v >= 0 ? '+' : '−') + Math.abs(v).toFixed(mm ? 1 : 3);
-    const tbl = h('table', { class: 'tb' }, h('tr', null, h('th', { text: 'Точка (после относительно до, ' + unit + ')' }), h('th', { class: 'n', text: 'По горизонтали' }), h('th', { class: 'n', text: 'По вертикали' })),
-      rows.map(r => h('tr', null, h('td', { text: r.label }), h('td', { class: 'n', text: f(mm ? r.dx_mm : r.dx) }), h('td', { class: 'n', text: f(mm ? r.dy_mm : r.dy) }))));
+    const tbl = h('table', { class: 'tb' }, h('tr', null, h('th', { text: T('Точка (после относительно до, ') + unit + ')' }), h('th', { class: 'n', text: T('По горизонтали') }), h('th', { class: 'n', text: T('По вертикали') })),
+      rows.map(r => h('tr', null, h('td', { text: T(r.label) }), h('td', { class: 'n', text: f(mm ? r.dx_mm : r.dx) }), h('td', { class: 'n', text: f(mm ? r.dy_mm : r.dy) }))));
     const warn = [];
-    if (!poseOk) warn.push('Поза на одном или обоих снимках вне допуска ' + tol + ' градусов от цели (до: ' + (ca.e ? 'yaw ' + ca.e.yaw.toFixed(0) + ', pitch ' + ca.e.pitch.toFixed(0) + ', roll ' + ca.e.roll.toFixed(0) : 'нет данных') + '; после: ' + (cb.e ? 'yaw ' + cb.e.yaw.toFixed(0) + ', pitch ' + cb.e.pitch.toFixed(0) + ', roll ' + cb.e.roll.toFixed(0) : 'нет данных') + '). Результат ориентировочный и в протокол не сохраняется.');
-    if (R.multi && (R.multi[0] || R.multi[1])) warn.push('На снимке найдено более одного лица: использовано самое крупное.');
-    if (pose === 'frontal' && !mm) warn.push('Калибровки нет: значения даны в долях межзрачкового расстояния, не в миллиметрах.');
-    if (mm && mm.approx) warn.push('Калибровка по радужке приблизительная: миллиметры ориентировочные. Для точности используйте калибровку по карте.');
-    if (pose !== 'frontal') warn.push('Для ракурса, отличного от анфаса, миллиметры не показываются: расстояния искажены поворотом.');
+    if (!poseOk) warn.push(T('Поза на одном или обоих снимках вне допуска ') + tol + T(' градусов от цели (до: ') + (ca.e ? 'yaw ' + ca.e.yaw.toFixed(0) + ', pitch ' + ca.e.pitch.toFixed(0) + ', roll ' + ca.e.roll.toFixed(0) : T('нет данных')) + T('; после: ') + (cb.e ? 'yaw ' + cb.e.yaw.toFixed(0) + ', pitch ' + cb.e.pitch.toFixed(0) + ', roll ' + cb.e.roll.toFixed(0) : T('нет данных')) + T('). Результат ориентировочный и в протокол не сохраняется.'));
+    if (R.multi && (R.multi[0] || R.multi[1])) warn.push(T('На снимке найдено более одного лица: использовано самое крупное.'));
+    if (pose === 'frontal' && !mm) warn.push(T('Калибровки нет: значения даны в долях межзрачкового расстояния, не в миллиметрах.'));
+    if (mm && mm.approx) warn.push(T('Калибровка по радужке приблизительная: миллиметры ориентировочные. Для точности используйте калибровку по карте.'));
+    if (pose !== 'frontal') warn.push(T('Для ракурса, отличного от анфаса, миллиметры не показываются: расстояния искажены поворотом.'));
     const msg = h('div', { class: 'stack' }, warn.map(w => h('div', { class: 'banner warn', style: 'border-radius:var(--r1)', text: w })));
     const saveBtn = h('button', { class: 'btn pri', disabled: !poseOk || null, onclick: async e => {
       e.target.disabled = true;
       const payload = { kind: 'compare', pose_ok: true, source: R.source, job_id: R.job_id, pose, before_id: before.id, after_id: after.id, before_ts: before.ts, after_ts: after.ts, norm: normName, scale: T.scale, rotation_deg: T.angle, tolerance: tol, rows: rows.map(r => { const o = { id: r.id, label: r.label, dx: r.dx, dy: r.dy }; if (mm) { o.dx_mm = r.dx_mm; o.dy_mm = r.dy_mm; } return o; }), ts: Math.floor(Date.now() / 1000) };
       if (mm) payload.calibration = mm;
-      try { await Api.post('/rooms/' + Api.room + '/measurements', payload); F.hist = null; Toast.show('Сравнение сохранено в протокол'); } catch (er) { Toast.err(er); e.target.disabled = false; }
-    } }, 'Сохранить в протокол');
-    const dl = h('button', { class: 'btn sec', onclick: () => cv.toBlob(b => { const a = h('a', { href: URL.createObjectURL(b), download: 'сравнение.png' }); document.body.append(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 500); }, 'image/png') }, icon('download'), 'Скачать изображение');
+      try { await Api.post('/rooms/' + Api.room + '/measurements', payload); F.hist = null; Toast.show(T('Сравнение сохранено в протокол')); } catch (er) { Toast.err(er); e.target.disabled = false; }
+    } }, T('Сохранить в протокол'));
+    const dl = h('button', { class: 'btn sec', onclick: () => cv.toBlob(b => { const a = h('a', { href: URL.createObjectURL(b), download: T('сравнение.png') }); document.body.append(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 500); }, 'image/png') }, icon('download'), T('Скачать изображение'));
     body.replaceChildren(
-      Ui.segmented([['wipe', 'Шторка'], ['blend', 'Наложение']], st.mode, m => { st.mode = m; render(); }, 'Режим сравнения'),
+      Ui.segmented([['wipe', T('Шторка')], ['blend', T('Наложение')]], st.mode, m => { st.mode = m; render(); }, T('Режим сравнения')),
       h('div', { class: 'cmp' }, cv), slider,
-      h('p', { class: 'note', style: 'margin:0', text: 'До: ' + fmtDT(before.ts) + '. После: ' + fmtDT(after.ts) + '. Снимок «после» совмещён со снимком «до» по жёстким точкам (масштаб ' + T.scale.toFixed(3) + ', поворот ' + T.angle.toFixed(1) + ' градусов).' }),
-      h('label', { class: 'row', style: 'min-height:44px' }, h('input', { type: 'checkbox', checked: true, style: 'width:22px;height:22px', onchange: e => { st.arrows = e.target.checked; render(); } }), ' Стрелки смещения ключевых точек'),
+      h('p', { class: 'note', style: 'margin:0', text: T('До: ') + fmtDT(before.ts) + T('. После: ') + fmtDT(after.ts) + T('. Снимок «после» совмещён со снимком «до» по жёстким точкам (масштаб ') + T.scale.toFixed(3) + T(', поворот ') + T.angle.toFixed(1) + T(' градусов).') }),
+      h('label', { class: 'row', style: 'min-height:44px' }, h('input', { type: 'checkbox', checked: true, style: 'width:22px;height:22px', onchange: e => { st.arrows = e.target.checked; render(); } }), T(' Стрелки смещения ключевых точек')),
       msg, tbl, h('p', { class: 'note', style: 'margin:0;font-weight:600', text: SIGN_SYM }),
       h('div', { class: 'row wrap' }, saveBtn, dl));
     render();
@@ -4968,14 +5824,14 @@ FaceMesh.Report = {
     const mine = k => { const l = hist.filter(m => m.kind === k && m.appt_id === a.id); return l.length ? l[l.length - 1].data : null; };
     const sym = F.latest.symmetry || mine('symmetry'), mob = F.latest.mobility || mine('mobility');
     const cmpList = hist.filter(m => m.kind === 'compare' && m.appt_id === a.id).map(m => m.data);
-    const rep = { kind: 'report', center: a.center || Cfg.center, patient: a.patient_name || '', patient_id: a.patient_id == null ? null : a.patient_id, doctor: a.doctor || '', appointment_id: a.id, date: fmtDT(Math.floor(Date.now() / 1000)), ts: Math.floor(Date.now() / 1000), symmetry: sym || null, mobility: mob || null, compare: cmpList, photo_ids: F.photos.map(p => ({ id: p.id, pose: p.pose, ts: p.ts })) };
+    const rep = { kind: 'report', center: T(a.center) || Cfg.center, patient: a.patient_name || '', patient_id: a.patient_id == null ? null : a.patient_id, doctor: a.doctor || '', appointment_id: a.id, date: fmtDT(Math.floor(Date.now() / 1000)), ts: Math.floor(Date.now() / 1000), symmetry: sym || null, mobility: mob || null, compare: cmpList, photo_ids: F.photos.map(p => ({ id: p.id, pose: p.pose, ts: p.ts })) };
     const cal = (sym && sym.calibration) || (cmpList.find(c => c.calibration) || {}).calibration || F.cal;
     if (cal) rep.calibration = cal;
     /* ход консультации: только обезличенный текст, проверенный врачом */
     try {
       const tr = await Api.get('/rooms/' + Api.room + '/transcript');
       if (tr.deid && tr.deid.status === 'done' && tr.deid.confirmed) rep.transcript = { segments: tr.deid.segments.map(g => ({ role: g.role, t: g.t, text: g.text })) };
-      else if (tr.deid && tr.deid.status !== 'none') rep.transcript_note = 'Расшифровка не включена: обезличенный текст ещё не проверен врачом.';
+      else if (tr.deid && tr.deid.status !== 'none') rep.transcript_note = T('Расшифровка не включена: обезличенный текст ещё не проверен врачом.');
     } catch (e) { /* расшифровки нет или сервис недоступен: раздел не выводится */ }
     return { rep, hist };
   },
@@ -4989,47 +5845,47 @@ FaceMesh.Report = {
   },
   node(rp) {
     const F = FaceMesh, rep = rp.rep;
-    const kids = [h('h1', { text: rep.center }), h('h2', { text: 'Документирование лица: отчёт' }),
-      h('table', null, h('tr', null, h('th', { text: 'Пациент' }), h('td', { text: rep.patient })), h('tr', null, h('th', { text: 'Дата' }), h('td', { text: rep.date })), h('tr', null, h('th', { text: 'Врач' }), h('td', { text: rep.doctor })),
-        h('tr', null, h('th', { text: 'Калибровка размеров' }), h('td', { text: rep.calibration ? rep.calibration.label + '; межзрачковое расстояние ' + rep.calibration.ipd_mm.toFixed(1).replace('.', ',') + ' мм' : 'нет (значения в миллиметрах не приводятся)' })))];
-    if (rep.symmetry) kids.push(h('h2', { text: 'Симметрия' }), F.symTable(rep.symmetry, true));
-    if (rep.mobility) kids.push(h('h2', { text: 'Подвижность лица' }), F.mobTable(rep.mobility));
-    if (rp.trends && rp.trends.length) { kids.push(h('h2', { text: 'Динамика между приёмами' })); for (const t of rp.trends) kids.push(h('img', { src: t.url, alt: t.title, style: 'max-height:60mm;display:block' })); }
+    const kids = [h('h1', { text: rep.center }), h('h2', { text: T('Документирование лица: отчёт') }),
+      h('table', null, h('tr', null, h('th', { text: T('Пациент') }), h('td', { text: rep.patient })), h('tr', null, h('th', { text: T('Дата') }), h('td', { text: rep.date })), h('tr', null, h('th', { text: T('Врач') }), h('td', { text: rep.doctor })),
+        h('tr', null, h('th', { text: T('Калибровка размеров') }), h('td', { text: rep.calibration ? T(rep.calibration.label) + T('; межзрачковое расстояние ') + rep.calibration.ipd_mm.toFixed(1).replace('.', DEC) + T(' мм') : T('нет (значения в миллиметрах не приводятся)') })))];
+    if (rep.symmetry) kids.push(h('h2', { text: T('Симметрия') }), F.symTable(rep.symmetry, true));
+    if (rep.mobility) kids.push(h('h2', { text: T('Подвижность лица') }), F.mobTable(rep.mobility));
+    if (rp.trends && rp.trends.length) { kids.push(h('h2', { text: T('Динамика между приёмами') })); for (const t of rp.trends) kids.push(h('img', { src: t.url, alt: t.title, style: 'max-height:60mm;display:block' })); }
     if (rep.compare && rep.compare.length) for (const c of rep.compare) {
       const mm = !!c.calibration, f = v => v == null ? '-' : (v >= 0 ? '+' : '−') + Math.abs(v).toFixed(mm ? 1 : 3);
-      kids.push(h('h2', { text: 'Сравнение до и после: ' + (POSE_NAMES[c.pose] || c.pose) }), h('p', { text: 'До: ' + fmtDT(c.before_ts) + '. После: ' + fmtDT(c.after_ts) + '. Единицы: ' + (c.norm === 'ipd' ? (mm ? 'мм' : 'доли МЗР') : 'доли высоты лица') + '.' }),
-        h('table', { class: 'tb' }, h('tr', null, h('th', { text: 'Точка' }), h('th', { class: 'n', text: 'По горизонтали' }), h('th', { class: 'n', text: 'По вертикали' })), c.rows.map(r => h('tr', null, h('td', { text: r.label }), h('td', { class: 'n', text: f(mm ? r.dx_mm : r.dx) }), h('td', { class: 'n', text: f(mm ? r.dy_mm : r.dy) })))));
+      kids.push(h('h2', { text: T('Сравнение до и после: ') + (POSE_NAMES[c.pose] || c.pose) }), h('p', { text: T('До: ') + fmtDT(c.before_ts) + T('. После: ') + fmtDT(c.after_ts) + T('. Единицы: ') + (c.norm === 'ipd' ? (mm ? T('мм') : T('доли МЗР')) : T('доли высоты лица')) + '.' }),
+        h('table', { class: 'tb' }, h('tr', null, h('th', { text: T('Точка') }), h('th', { class: 'n', text: T('По горизонтали') }), h('th', { class: 'n', text: T('По вертикали') })), c.rows.map(r => h('tr', null, h('td', { text: T(r.label) }), h('td', { class: 'n', text: f(mm ? r.dx_mm : r.dx) }), h('td', { class: 'n', text: f(mm ? r.dy_mm : r.dy) })))));
     }
     if (rep.transcript && rep.transcript.segments.length) {
       const t0 = rep.transcript.segments[0].t;
-      kids.push(h('h2', { text: 'Ход консультации' }), h('p', { class: 'sm', text: 'Обезличенная расшифровка речи, проверена врачом. Метки в квадратных скобках скрывают личные данные.' }),
-        h('table', { class: 'tb' }, rep.transcript.segments.map(g => { const s = Math.max(0, Math.round((g.t - t0) / 1000)); return h('tr', null, h('td', { class: 'n', text: pad2(Math.floor(s / 60)) + ':' + pad2(s % 60) }), h('td', { text: g.role === 'doctor' ? 'Врач' : 'Пациент' }), h('td', { text: g.text })); })));
+      kids.push(h('h2', { text: T('Ход консультации') }), h('p', { class: 'sm', text: T('Обезличенная расшифровка речи, проверена врачом. Метки в квадратных скобках скрывают личные данные.') }),
+        h('table', { class: 'tb' }, rep.transcript.segments.map(g => { const s = Math.max(0, Math.round((g.t - t0) / 1000)); return h('tr', null, h('td', { class: 'n', text: pad2(Math.floor(s / 60)) + ':' + pad2(s % 60) }), h('td', { text: g.role === 'doctor' ? T('Врач') : T('Пациент') }), h('td', { text: g.text })); })));
     }
-    if (rep.photo_ids.length) { kids.push(h('h2', { text: 'Снимки приёма' }), h('div', { class: 'thumbs' }, rep.photo_ids.map(p => F.thumbEl(p)))); }
-    kids.push(h('p', { class: 'sm', text: 'Документ содержит числовые наблюдения для документирования. Он не является диагнозом и не заменяет клинической оценки врача. ' + SIGN_SYM + '. ' + SIGN_MOB + '.' }),
-      h('div', { class: 'sign', text: 'Подпись врача ______________________ / ' + rep.doctor + ' /' }));
+    if (rep.photo_ids.length) { kids.push(h('h2', { text: T('Снимки приёма') }), h('div', { class: 'thumbs' }, rep.photo_ids.map(p => F.thumbEl(p)))); }
+    kids.push(h('p', { class: 'sm', text: T('Документ содержит числовые наблюдения для документирования. Он не является диагнозом и не заменяет клинической оценки врача. ') + SIGN_SYM + '. ' + SIGN_MOB + '.' }),
+      h('div', { class: 'sign', text: T('Подпись врача ______________________ / ') + rep.doctor + ' /' }));
     return h('div', null, kids);
   },
   show(out, rp) {
     const F = FaceMesh, rep = rp.rep;
     const none = !rep.symmetry && !rep.mobility && !(rep.compare && rep.compare.length) && !rep.photo_ids.length && !rep.transcript;
     out.replaceChildren(
-      h('h3', { text: 'Отчёт от ' + rep.date }),
-      h('div', { class: 'row wrap', role: 'list', 'aria-label': 'Что вошло в отчёт' }, [['Симметрия', !!rep.symmetry], ['Подвижность', !!rep.mobility], ['Сравнения', (rep.compare || []).length], ['Снимки', rep.photo_ids.length], ['Графики', (rp.trends || []).length], ['Расшифровка', !!rep.transcript]]
-        .map(([k, v]) => h('span', { class: 'chip' + (v ? ' g' : ''), role: 'listitem', text: k + ': ' + (v === true ? 'есть' : v === false ? 'нет' : v) }))),
+      h('h3', { text: T('Отчёт от ') + rep.date }),
+      h('div', { class: 'row wrap', role: 'list', 'aria-label': T('Что вошло в отчёт') }, [[T('Симметрия'), !!rep.symmetry], [T('Подвижность'), !!rep.mobility], [T('Сравнения'), (rep.compare || []).length], [T('Снимки'), rep.photo_ids.length], [T('Графики'), (rp.trends || []).length], [T('Расшифровка'), !!rep.transcript]]
+        .map(([k, v]) => h('span', { class: 'chip' + (v ? ' g' : ''), role: 'listitem', text: k + ': ' + (v === true ? T('есть') : v === false ? T('нет') : v) }))),
       /* replaceChildren(null) выводит «null»: пустая строка не видна */
       rep.transcript_note ? h('p', { class: 'note', style: 'margin:0', text: rep.transcript_note }) : '',
-      ...(none ? [h('div', { class: 'banner warn', style: 'border-radius:var(--r1)', text: 'В этом приёме пока нет данных для отчёта.' })] : []),
+      ...(none ? [h('div', { class: 'banner warn', style: 'border-radius:var(--r1)', text: T('В этом приёме пока нет данных для отчёта.') })] : []),
       h('div', { class: 'row wrap' },
         h('button', { class: 'btn pri', onclick: async () => {
           const node = this.node(rp);
           const imgs = [...node.querySelectorAll('img')];
           await Promise.all(imgs.map(i => i.decode ? i.decode().catch(() => { }) : Promise.resolve()));
           Print.go(node);
-        } }, 'Печать или PDF'),
-        h('button', { class: 'btn sec', onclick: () => Ui.download('отчёт-лицо-' + (rep.appointment_id || 'приём') + '.json', JSON.stringify(rep, null, 2)) }, icon('download'), 'Данные отчёта (JSON)'),
-        h('button', { class: 'btn sec', disabled: !(rep.symmetry || rep.mobility) || null, title: 'HL7 FHIR R4: пациент и наблюдения для медицинской информационной системы', onclick: () => Ui.download('fhir-лицо-' + (rep.appointment_id || 'приём') + '.json', JSON.stringify(F.Fhir.bundle(rep), null, 2), 'application/fhir+json') }, icon('download'), 'Экспорт FHIR'),
-        h('button', { class: 'btn sec', onclick: async e => { e.target.disabled = true; try { await Api.post('/rooms/' + Api.room + '/measurements', rep); Toast.show('Отчёт сохранён в протокол'); } catch (er) { Toast.err(er); } e.target.disabled = false; } }, 'Сохранить в протокол')));
+        } }, T('Печать или PDF')),
+        h('button', { class: 'btn sec', onclick: () => Ui.download(T('отчёт-лицо-') + (rep.appointment_id || T('приём')) + '.json', JSON.stringify(rep, null, 2)) }, icon('download'), T('Данные отчёта (JSON)')),
+        h('button', { class: 'btn sec', disabled: !(rep.symmetry || rep.mobility) || null, title: T('HL7 FHIR R4: пациент и наблюдения для медицинской информационной системы'), onclick: () => Ui.download(T('fhir-лицо-') + (rep.appointment_id || T('приём')) + '.json', JSON.stringify(F.Fhir.bundle(rep), null, 2), 'application/fhir+json') }, icon('download'), T('Экспорт FHIR')),
+        h('button', { class: 'btn sec', onclick: async e => { e.target.disabled = true; try { await Api.post('/rooms/' + Api.room + '/measurements', rep); Toast.show(T('Отчёт сохранён в протокол')); } catch (er) { Toast.err(er); } e.target.disabled = false; } }, T('Сохранить в протокол'))));
   }
 };
 
@@ -5058,11 +5914,13 @@ FaceMesh.Repeat = {
   /* таблица для отчёта: разделитель «;» и десятичная запятая открываются в русском Excel */
   csv(list) {
     const s = this.stats(list), k = s.mm ? '_mm' : '', d = s.mm ? 2 : 4;
-    const num = v => v == null || !isFinite(v) ? '' : v.toFixed(d).replace('.', ',');
-    const out = ['замер;метрика;правая;левая;разность;единицы'];
-    list.forEach((m, i) => (m.rows || []).forEach(r => out.push([i + 1, r.label, num(r['right' + k]), num(r['left' + k]), num(r['diff' + k]), s.mm ? 'мм' : 'доли МЗР'].join(';'))));
-    out.push('', 'итог;метрика;разность: среднее;разность: SD;минимальное различимое изменение (MDC95);замеров');
-    s.rows.forEach(r => out.push(['итог', r.label, num(r.diff.mean), num(r.diff.sd), num(r.diff.mdc), r.n].join(';')));
+    const num = v => v == null || !isFinite(v) ? '' : v.toFixed(d).replace('.', DEC);
+    /* в русском Excel разделитель «;» и десятичная запятая, в английском — «,» и точка */
+    const SEP = LANG === 'ru' ? ';' : ',', cell = c => String(c).includes(SEP) || String(c).includes('"') ? '"' + String(c).replace(/"/g, '""') + '"' : c, row = cells => cells.map(cell).join(SEP);
+    const out = [T('замер;метрика;правая;левая;разность;единицы').split(';').join(SEP)];
+    list.forEach((m, i) => (m.rows || []).forEach(r => out.push(row([i + 1, T(r.label), num(r['right' + k]), num(r['left' + k]), num(r['diff' + k]), s.mm ? T('мм') : T('доли МЗР')]))));
+    out.push('', T('итог;метрика;разность: среднее;разность: SD;минимальное различимое изменение (MDC95);замеров').split(';').join(SEP));
+    s.rows.forEach(r => out.push(row([T('итог'), T(r.label), num(r.diff.mean), num(r.diff.sd), num(r.diff.mdc), r.n])));
     return out.join('\n') + '\n';
   }
 };
@@ -5072,7 +5930,7 @@ FaceMesh.Repeat = {
    единицы — UCUM: mm с калибровкой, «1» для долей межзрачкового расстояния, deg для углов. */
 FaceMesh.Fhir = {
   SYS: 'urn:mars:face-metric', UCUM: 'http://unitsofmeasure.org',
-  NOTE_SYM: 'Числа для документирования, не диагноз', NOTE_MOB: 'Наблюдение для врача, не оценка по клинической шкале',
+  NOTE_SYM: T('Числа для документирования, не диагноз'), NOTE_MOB: T('Наблюдение для врача, не оценка по клинической шкале'),
   seq: 0,
   uuid() {
     if (typeof crypto !== 'undefined' && crypto.randomUUID) return crypto.randomUUID();
@@ -5080,7 +5938,7 @@ FaceMesh.Fhir = {
     return '00000000-0000-4000-8000-' + hex.slice(-12);
   },
   qty(value, mm, unitOverride) {
-    const [unit, code] = unitOverride || (mm ? ['мм', 'mm'] : ['доли МЗР', '1']);
+    const [unit, code] = unitOverride || (mm ? [T('мм'), 'mm'] : [T('доли МЗР'), '1']);
     return { value, unit, system: this.UCUM, code };
   },
   iso(ts) { return new Date(ts * 1000).toISOString(); },
@@ -5093,23 +5951,23 @@ FaceMesh.Fhir = {
   /* компоненты наблюдения: правая, левая и третье значение (разность или соотношение); unit — [подпись, код UCUM] */
   sides(right, left, third, mm, unit, thirdUnit) {
     const c = (text, v, u) => v == null || !isFinite(v) ? null : { code: { text }, valueQuantity: this.qty(v, mm, u) };
-    return [c('Правая сторона', right, unit), c('Левая сторона', left, unit), third ? c(third[0], third[1], thirdUnit || unit) : null].filter(Boolean);
+    return [c(T('Правая сторона'), right, unit), c(T('Левая сторона'), left, unit), third ? c(third[0], third[1], thirdUnit || unit) : null].filter(Boolean);
   },
   symObs(subject, s) {
     const mm = !!(s.calibration && s.calibration.ipd_mm), k = f => mm ? f + '_mm' : f, ts = s.ts;
-    const method = { text: mm ? 'Калибровка ' + s.calibration.label : 'Нормировка на межзрачковое расстояние, без калибровки' };
-    const device = { display: 'M.A.R.S., расчёт: ' + (s.source === 'vision' ? 'сервис анализа' : 'устройство пациента') };
+    const method = { text: mm ? T('Калибровка ') + s.calibration.label : T('Нормировка на межзрачковое расстояние, без калибровки') };
+    const device = { display: T('M.A.R.S., расчёт: ') + (s.source === 'vision' ? T('сервис анализа') : T('устройство пациента')) };
     const rows = (s.rows || []).map(r => this.obs(subject, 'symmetry.' + r.id, r.label, ts, this.NOTE_SYM,
-      { method, device, component: this.sides(r[k('right')], r[k('left')], ['Разность (правая − левая)', r[k('diff')]], mm) }));
+      { method, device, component: this.sides(r[k('right')], r[k('left')], [T('Разность (правая − левая)'), r[k('diff')]], mm) }));
     const singles = (s.singles || []).filter(x => x.value != null && isFinite(x.value)).map(x => this.obs(subject, 'symmetry.' + x.id, x.label, ts, this.NOTE_SYM,
-      { method, device, valueQuantity: x.unit === 'deg' ? this.qty(x.value, false, ['градусы', 'deg']) : this.qty(mm && x.value_mm != null ? x.value_mm : x.value, mm && x.value_mm != null) }));
+      { method, device, valueQuantity: x.unit === 'deg' ? this.qty(x.value, false, [T('градусы'), 'deg']) : this.qty(mm && x.value_mm != null ? x.value_mm : x.value, mm && x.value_mm != null) }));
     return rows.concat(singles);
   },
   mobObs(subject, m) {
-    const coef = ['коэффициент 0–1', '1'];
+    const coef = [T('коэффициент 0–1'), '1'];
     return (m.tasks || []).map(t => this.obs(subject, 'mobility.' + t.id, t.label, m.ts, this.NOTE_MOB, t.single != null
       ? { valueQuantity: this.qty(t.single, false, coef) }
-      : { component: this.sides(t.right, t.left, ['Соотношение сторон', t.ratio], false, coef, ['отношение', '1']) }));
+      : { component: this.sides(t.right, t.left, [T('Соотношение сторон'), t.ratio], false, coef, [T('отношение'), '1']) }));
   },
   bundle(rep) {
     const entries = [], add = r => { const fullUrl = 'urn:uuid:' + this.uuid(); entries.push({ fullUrl, resource: r }); return fullUrl; };
@@ -5145,7 +6003,7 @@ const Speech = {
     if (on === this.on) return this.paint();
     this.on = on;
     if (on) {
-      if (!this.mime() || !Media.stream || !Media.stream.getAudioTracks().length) { this.on = false; Toast.show('Запись речи недоступна в этом браузере'); return this.paint(); }
+      if (!this.mime() || !Media.stream || !Media.stream.getAudioTracks().length) { this.on = false; Toast.show(T('Запись речи недоступна в этом браузере')); return this.paint(); }
       this.sid = Remote_key(); this.seq = 0; this.t00 = performance.now(); this.cycle();
       if (State.v.role === 'doctor') { clearInterval(this.poll); this.poll = setInterval(() => this.refresh(), 10000); this.refresh(); }
     } else {
@@ -5161,7 +6019,7 @@ const Speech = {
     if (!tr) { this.set(false); return; }
     let rec;
     try { rec = new MediaRecorder(new MediaStream([tr]), { mimeType: this.mime(), audioBitsPerSecond: 32000 }); }
-    catch (e) { console.warn('MediaRecorder', e); this.on = false; this.paint(); Toast.show('Не удалось начать запись речи'); return; }
+    catch (e) { console.warn('MediaRecorder', e); this.on = false; this.paint(); Toast.show(T('Не удалось начать запись речи')); return; }
     const parts = [], t0 = performance.now(), t00 = this.t00, sid = this.sid, seq = this.seq++;
     rec.ondataavailable = e => { if (e.data && e.data.size) parts.push(e.data); };
     rec.onstop = () => {
@@ -5204,35 +6062,35 @@ const Speech = {
     const c = this.chip; if (!c) return;
     const st = this.st, doc = State.v.role === 'doctor';
     let txt = '';
-    if (this.on) txt = '● Идёт расшифровка речи';
-    else if (doc && st && st.queued) txt = 'Расшифровка: в очереди ' + st.queued;
-    if (txt && doc && st && st.chunks) txt += ' · ' + st.done + ' из ' + st.chunks + (st.service_up === false ? ' · сервис недоступен, куски сохранены' : '');
-    if (this.on && this.q.length > 1) txt += ' · не отправлено ' + this.q.length;
+    if (this.on) txt = T('● Идёт расшифровка речи');
+    else if (doc && st && st.queued) txt = T('Расшифровка: в очереди ') + st.queued;
+    if (txt && doc && st && st.chunks) txt += ' · ' + st.done + T(' из ') + st.chunks + (st.service_up === false ? T(' · сервис недоступен, куски сохранены') : '');
+    if (this.on && this.q.length > 1) txt += T(' · не отправлено ') + this.q.length;
     c.textContent = txt; c.classList.toggle('hidden', !txt);
-    c.title = doc ? 'Остановить расшифровку' : 'Остановить расшифровку (отозвать согласие)';
+    c.title = doc ? T('Остановить расшифровку') : T('Остановить расшифровку (отозвать согласие)');
     c.setAttribute('aria-label', txt + '. ' + c.title);
   },
   async chipClick() {
     if (!this.on) return;
     if (State.v.role === 'doctor') return this.stopByDoctor();
-    if (!(await Ui.confirm('Остановить расшифровку?', 'Запись вашей речи прекратится. Уже расшифрованный текст останется у врача.', 'Остановить', true))) return;
+    if (!(await Ui.confirm(T('Остановить расшифровку?'), T('Запись вашей речи прекратится. Уже расшифрованный текст останется у врача.'), T('Остановить'), true))) return;
     this.answer(false);
   },
   /* врач: запросить согласие или остановить */
   async request() {
     if (this.on) return this.stopByDoctor();
-    try { await Api.ev('control', { action: 'speech_request' }); Toast.show('Пациенту отправлен запрос на согласие'); } catch (e) { Toast.err(e); }
+    try { await Api.ev('control', { action: 'speech_request' }); Toast.show(T('Пациенту отправлен запрос на согласие')); } catch (e) { Toast.err(e); }
   },
   async stopByDoctor() { try { await Api.ev('control', { action: 'speech_stop' }); } catch (e) { Toast.err(e); } },
   /* пациент: лист согласия */
   ask() {
     const s = Ui.sheet({
-      title: 'Согласие на расшифровку речи',
-      actions: [{ label: 'Не согласен(на)', kind: 'sec', onClick: () => this.answer(false) }, { label: 'Согласен(на)', kind: 'pri', onClick: () => this.answer(true) }]
+      title: T('Согласие на расшифровку речи'),
+      actions: [{ label: T('Не согласен(на)'), kind: 'sec', onClick: () => this.answer(false) }, { label: T('Согласен(на)'), kind: 'pri', onClick: () => this.answer(true) }]
     });
-    s.el.append(h('p', { style: 'margin:0', text: 'Врач просит включить расшифровку консультации. Что происходит: ваш микрофон записывается кусками по 10 секунд и отправляется на сервер медицинского центра, где речь переводится в текст.' }),
-      h('p', { style: 'margin:0', text: 'Аудиозапись удаляется сразу после расшифровки. Текст видит только врач; в отчёт он попадёт только без ваших личных данных.' }),
-      h('p', { class: 'note', style: 'margin:0', text: 'Согласие можно отозвать в любой момент: нажмите на индикатор «Идёт расшифровка речи» вверху экрана.' }));
+    s.el.append(h('p', { style: 'margin:0', text: T('Врач просит включить расшифровку консультации. Что происходит: ваш микрофон записывается кусками по 10 секунд и отправляется на сервер медицинского центра, где речь переводится в текст.') }),
+      h('p', { style: 'margin:0', text: T('Аудиозапись удаляется сразу после расшифровки. Текст видит только врач; в отчёт он попадёт только без ваших личных данных.') }),
+      h('p', { class: 'note', style: 'margin:0', text: T('Согласие можно отозвать в любой момент: нажмите на индикатор «Идёт расшифровка речи» вверху экрана.') }));
   },
   async answer(g) { try { await Api.ev('control', { action: 'speech_consent', granted: g }); } catch (e) { Toast.err(e); } },
   /* события control от сервера */
@@ -5240,10 +6098,10 @@ const Speech = {
     if (d.action === 'speech_request') { if (State.v.role === 'patient') this.ask(); return; }
     if (d.action === 'speech_consent') {
       this.consent = !!d.granted; this.set(!!d.granted);
-      if (State.v.role === 'doctor') Toast.show(d.granted ? 'Пациент согласился на расшифровку речи' : 'Пациент отказался от расшифровки речи');
+      if (State.v.role === 'doctor') Toast.show(d.granted ? T('Пациент согласился на расшифровку речи') : T('Пациент отказался от расшифровки речи'));
       return;
     }
-    if (d.action === 'speech_stop') { this.set(false); if (State.v.role === 'patient') Toast.show('Врач остановил расшифровку речи'); }
+    if (d.action === 'speech_stop') { this.set(false); if (State.v.role === 'patient') Toast.show(T('Врач остановил расшифровку речи')); }
   },
   stop() { this.set(false); }
 };
@@ -5252,8 +6110,8 @@ const Remote_key = () => (crypto.randomUUID ? crypto.randomUUID() : Date.now().t
 /* ===== Вкладка «Расшифровка» (только врач): обезличенный текст, правки замен, подтверждение для отчёта ===== */
 const Transcript = {
   el: null, d: null, st: null, timer: null, busy: false,
-  ROLE: { doctor: 'Врач', patient: 'Пациент' },
-  TYPES: [['NAME', 'Имя'], ['ORG', 'Организация'], ['CITY', 'Место'], ['SCHOOL', 'Учебное заведение'], ['OTHER', 'Другое']],
+  ROLE: { doctor: T('Врач'), patient: T('Пациент') },
+  TYPES: [['NAME', T('Имя')], ['ORG', T('Организация')], ['CITY', T('Место')], ['SCHOOL', T('Учебное заведение')], ['OTHER', T('Другое')]],
   build() { this.el = h('div', { class: 'stack' }); this.render(); return this.el; },
   async load() {
     if (!Api.room || State.v.role !== 'doctor') return;
@@ -5270,22 +6128,22 @@ const Transcript = {
     this.busy = false;
   },
   async redo() {
-    if (this.d && this.d.status === 'done' && !(await Ui.confirm('Обезличить повторно?', 'Расшифровка будет обезличена заново. Ваши ручные правки и подтверждение будут сброшены.', 'Обезличить'))) return;
+    if (this.d && this.d.status === 'done' && !(await Ui.confirm(T('Обезличить повторно?'), T('Расшифровка будет обезличена заново. Ваши ручные правки и подтверждение будут сброшены.'), T('Обезличить')))) return;
     try { const r = await Api.post('/rooms/' + Api.room + '/transcript/deidentify', {}); this.d = r.deid; this.render(); this.load(); }
     catch (e) { Toast.err(e); }
   },
   async original() {
-    if (!(await Ui.confirm('Показать оригинал?', 'Исходная расшифровка содержит личные данные пациента. Просмотр записывается в журнал аудита.', 'Показать'))) return;
+    if (!(await Ui.confirm(T('Показать оригинал?'), T('Исходная расшифровка содержит личные данные пациента. Просмотр записывается в журнал аудита.'), T('Показать')))) return;
     let r; try { r = await Api.get('/rooms/' + Api.room + '/transcript/original'); } catch (e) { Toast.err(e); return; }
-    const s = Ui.sheet({ title: 'Исходная расшифровка', wide: true });
-    s.el.append(h('div', { class: 'banner warn', style: 'border-radius:var(--r1)', text: 'Содержит личные данные. Не копируйте этот текст в отчёт.' }), this.list(r.segments, false));
+    const s = Ui.sheet({ title: T('Исходная расшифровка'), wide: true });
+    s.el.append(h('div', { class: 'banner warn', style: 'border-radius:var(--r1)', text: T('Содержит личные данные. Не копируйте этот текст в отчёт.') }), this.list(r.segments, false));
   },
   addSheet() {
     const sel = (window.getSelection && String(window.getSelection())).trim();
     const inp = h('input', { class: 'inp', value: sel, maxlength: 200 });
     const typ = h('select', { class: 'inp' }, this.TYPES.map(([v, l]) => h('option', { value: v, text: l })));
-    const s = Ui.sheet({ title: 'Добавить замену', actions: [{ label: 'Отмена', kind: 'sec' }, { label: 'Заменить везде', kind: 'pri', onClick: () => { if (inp.value.trim().length < 2) { Toast.show('Введите фрагмент'); return false; } this.edit({ op: 'add', text: inp.value.trim(), type: typ.value }); } }] });
-    s.el.append(h('p', { class: 'note', style: 'margin:0', text: 'Фрагмент будет скрыт меткой во всей расшифровке. Можно выделить его в тексте до нажатия кнопки.' }), Ui.field('Фрагмент', inp), Ui.field('Что это', typ));
+    const s = Ui.sheet({ title: T('Добавить замену'), actions: [{ label: T('Отмена'), kind: 'sec' }, { label: T('Заменить везде'), kind: 'pri', onClick: () => { if (inp.value.trim().length < 2) { Toast.show(T('Введите фрагмент')); return false; } this.edit({ op: 'add', text: inp.value.trim(), type: typ.value }); } }] });
+    s.el.append(h('p', { class: 'note', style: 'margin:0', text: T('Фрагмент будет скрыт меткой во всей расшифровке. Можно выделить его в тексте до нажатия кнопки.') }), Ui.field(T('Фрагмент'), inp), Ui.field(T('Что это'), typ));
   },
   /* текст с подсвеченными метками; клик по метке предлагает отменить замену */
   textNode(text, editable) {
@@ -5293,7 +6151,7 @@ const Transcript = {
     while ((m = rx.exec(text))) {
       if (m.index > pos) out.push(text.slice(pos, m.index));
       const lab = m[0];
-      out.push(editable ? h('button', { class: 'chip b', style: 'border:0;cursor:pointer;margin:0 1px', title: 'Отменить замену', onclick: async () => { if (await Ui.confirm('Отменить замену ' + lab + '?', 'Под этой меткой во всей расшифровке будет показан исходный текст. Делайте это, только если это не личные данные (например, название лекарства).', 'Отменить замену')) this.edit({ op: 'undo', label: lab }); } }, lab)
+      out.push(editable ? h('button', { class: 'chip b', style: 'border:0;cursor:pointer;margin:0 1px', title: T('Отменить замену'), onclick: async () => { if (await Ui.confirm(T('Отменить замену ') + lab + '?', T('Под этой меткой во всей расшифровке будет показан исходный текст. Делайте это, только если это не личные данные (например, название лекарства).'), T('Отменить замену'))) this.edit({ op: 'undo', label: lab }); } }, lab)
         : h('span', { class: 'chip b', style: 'margin:0 1px' }, lab));
       pos = m.index + lab.length;
     }
@@ -5311,26 +6169,26 @@ const Transcript = {
   render() {
     const el = this.el; if (!el) return;
     const d = this.d, st = this.st, kids = [];
-    if (!d) { el.replaceChildren(h('p', { class: 'mut', text: 'Загрузка...' })); return; }
-    const live = st && st.chunks ? 'Кусков записи: ' + st.chunks + ', расшифровано: ' + st.done + (st.queued ? ', в очереди: ' + st.queued : '') + '.' : '';
-    if (d.status === 'none') kids.push(h('p', { style: 'margin:0', text: 'Обезличенной расшифровки пока нет. Она появится после завершения приёма, если пациент дал согласие на расшифровку речи.' }), live ? h('p', { class: 'note', style: 'margin:0', text: live }) : null,
-      Speech.on ? null : h('button', { class: 'btn pri', style: 'align-self:flex-start', onclick: () => Speech.request() }, icon('audio'), 'Запросить согласие на расшифровку'));
-    if (d.status === 'queued') kids.push(h('div', { class: 'banner', style: 'border-radius:var(--r1)', role: 'status', text: d.waiting ? 'Сервис обезличивания временно недоступен. Расшифровка сохранена и будет обезличена, когда сервис заработает.' : 'Идёт обезличивание расшифровки. На процессоре это может занять несколько минут.' }));
-    if (d.status === 'error') kids.push(h('div', { class: 'banner bad', style: 'border-radius:var(--r1)', text: 'Не удалось обезличить: ' + ((d.error && d.error.message) || 'ошибка') + '.' }));
-    if (st && (st.error || st.cancelled)) kids.push(h('div', { class: 'banner warn', style: 'border-radius:var(--r1)', text: 'Расшифровка неполная: ' + (st.error ? 'не удалось расшифровать кусков записи — ' + st.error : '') + (st.error && st.cancelled ? '; ' : '') + (st.cancelled ? 'удалено после отзыва согласия — ' + st.cancelled : '') + '.' }));
+    if (!d) { el.replaceChildren(h('p', { class: 'mut', text: T('Загрузка...') })); return; }
+    const live = st && st.chunks ? T('Кусков записи: ') + st.chunks + T(', расшифровано: ') + st.done + (st.queued ? T(', в очереди: ') + st.queued : '') + '.' : '';
+    if (d.status === 'none') kids.push(h('p', { style: 'margin:0', text: T('Обезличенной расшифровки пока нет. Она появится после завершения приёма, если пациент дал согласие на расшифровку речи.') }), live ? h('p', { class: 'note', style: 'margin:0', text: live }) : null,
+      Speech.on ? null : h('button', { class: 'btn pri', style: 'align-self:flex-start', onclick: () => Speech.request() }, icon('audio'), T('Запросить согласие на расшифровку')));
+    if (d.status === 'queued') kids.push(h('div', { class: 'banner', style: 'border-radius:var(--r1)', role: 'status', text: d.waiting ? T('Сервис обезличивания временно недоступен. Расшифровка сохранена и будет обезличена, когда сервис заработает.') : T('Идёт обезличивание расшифровки. На процессоре это может занять несколько минут.') }));
+    if (d.status === 'error') kids.push(h('div', { class: 'banner bad', style: 'border-radius:var(--r1)', text: T('Не удалось обезличить: ') + ((d.error && d.error.message) || T('ошибка')) + '.' }));
+    if (st && (st.error || st.cancelled)) kids.push(h('div', { class: 'banner warn', style: 'border-radius:var(--r1)', text: T('Расшифровка неполная: ') + (st.error ? T('не удалось расшифровать кусков записи — ') + st.error : '') + (st.error && st.cancelled ? '; ' : '') + (st.cancelled ? T('удалено после отзыва согласия — ') + st.cancelled : '') + '.' }));
     const btns = [];
     if (d.status === 'done') {
-      kids.push(h('div', { class: 'row wrap', style: 'gap:8px' }, d.confirmed ? h('span', { class: 'chip g', text: 'Проверено врачом, идёт в отчёт' }) : h('span', { class: 'chip o', text: 'Не проверено: в отчёт не попадает' }),
-        h('span', { class: 'sm mut', text: 'Замен: ' + (d.replacements || []).length + (d.model ? ' · ' + d.model : '') })));
-      kids.push(h('p', { class: 'note', style: 'margin:0', text: 'Проверьте текст: нейросеть может пропустить имя или название. Синие метки скрывают личные данные; нажмите на метку, чтобы отменить замену.' }));
-      if (d.editable) btns.push(h('button', { class: 'btn sec', onclick: () => this.addSheet() }, 'Добавить замену'));
-      btns.push(h('button', { class: 'btn ' + (d.confirmed ? 'sec' : 'pri'), onclick: () => this.edit({ op: d.confirmed ? 'unconfirm' : 'confirm' }) }, d.confirmed ? 'Снять подтверждение' : 'Подтвердить для отчёта'));
+      kids.push(h('div', { class: 'row wrap', style: 'gap:8px' }, d.confirmed ? h('span', { class: 'chip g', text: T('Проверено врачом, идёт в отчёт') }) : h('span', { class: 'chip o', text: T('Не проверено: в отчёт не попадает') }),
+        h('span', { class: 'sm mut', text: T('Замен: ') + (d.replacements || []).length + (d.model ? ' · ' + d.model : '') })));
+      kids.push(h('p', { class: 'note', style: 'margin:0', text: T('Проверьте текст: нейросеть может пропустить имя или название. Синие метки скрывают личные данные; нажмите на метку, чтобы отменить замену.') }));
+      if (d.editable) btns.push(h('button', { class: 'btn sec', onclick: () => this.addSheet() }, T('Добавить замену')));
+      btns.push(h('button', { class: 'btn ' + (d.confirmed ? 'sec' : 'pri'), onclick: () => this.edit({ op: d.confirmed ? 'unconfirm' : 'confirm' }) }, d.confirmed ? T('Снять подтверждение') : T('Подтвердить для отчёта')));
     }
-    if (d.status !== 'none' || (st && st.chunks)) btns.push(h('button', { class: 'btn sec', onclick: () => this.original() }, 'Показать оригинал'));
-    if (d.status === 'done' || d.status === 'error' || (d.status === 'none' && st && st.chunks)) btns.push(h('button', { class: 'btn sec', onclick: () => this.redo() }, d.status === 'none' ? 'Обезличить сейчас' : 'Обезличить повторно'));
+    if (d.status !== 'none' || (st && st.chunks)) btns.push(h('button', { class: 'btn sec', onclick: () => this.original() }, T('Показать оригинал')));
+    if (d.status === 'done' || d.status === 'error' || (d.status === 'none' && st && st.chunks)) btns.push(h('button', { class: 'btn sec', onclick: () => this.redo() }, d.status === 'none' ? T('Обезличить сейчас') : T('Обезличить повторно')));
     if (btns.length) kids.push(h('div', { class: 'row wrap' }, btns));
     if (d.segments && d.segments.length) kids.push(this.list(d.segments, d.status === 'done' && d.editable));
-    else if (d.status === 'done') kids.push(h('p', { class: 'mut', text: 'В записи не найдено речи.' }));
+    else if (d.status === 'done') kids.push(h('p', { class: 'mut', text: T('В записи не найдено речи.') }));
     el.replaceChildren(...kids.filter(Boolean));
   }
 };

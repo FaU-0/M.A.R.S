@@ -72,7 +72,7 @@ const fmtDT = ts => fmtDate(ts) + ' ' + fmtTime(ts);
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 const median = arr => { if (!arr.length) return null; const s = arr.slice().sort((a, b) => a - b); const m = s.length >> 1; return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2; };
 const sleep = ms => new Promise(r => setTimeout(r, ms));
-const POSE_NAMES = { frontal: 'Анфас', left45: 'Поворот влево 45', right45: 'Поворот вправо 45', left90: 'Левый профиль 90', right90: 'Правый профиль 90', free: 'Свободный' };
+const POSE_NAMES = { frontal: T('Анфас'), left45: T('Поворот влево 45'), right45: T('Поворот вправо 45'), left90: T('Левый профиль 90'), right90: T('Правый профиль 90'), free: T('Свободный') };
 
 /* ===== Единое состояние с подпиской ===== */
 const State = {
@@ -85,7 +85,7 @@ const State = {
   },
   sub(f) { this.subs.push(f); }
 };
-const Cfg = { center: 'Медицинский центр', mediapipe: false, auth: true, secure: false };
+const Cfg = { center: T('Медицинский центр'), mediapipe: false, auth: true, secure: false };
 
 /* ===== Уведомления ===== */
 const Toast = {
@@ -96,7 +96,7 @@ const Toast = {
     requestAnimationFrame(() => t.classList.add('on'));
     setTimeout(() => { t.classList.remove('on'); setTimeout(() => t.remove(), 250); }, ms || 3500);
   },
-  err(e) { this.show(typeof e === 'string' ? e : (e && e.message) || 'Ошибка', 'err', 5000); }
+  err(e) { this.show(typeof e === 'string' ? e : (e && e.message) || T('Ошибка'), 'err', 5000); }
 };
 
 /* ===== Общий rAF-цикл ===== */
@@ -124,10 +124,10 @@ const Ui = {
     const root = $('#sheets');
     const scrim = h('div', { class: 'scrim' });
     const body = h('div', { class: 'stack' });
-    const sheet = h('div', { class: 'sheet' + (opt.wide ? ' wide' : ''), role: 'dialog', 'aria-modal': 'true', 'aria-label': opt.title || 'Диалог' });
+    const sheet = h('div', { class: 'sheet' + (opt.wide ? ' wide' : ''), role: 'dialog', 'aria-modal': 'true', 'aria-label': opt.title || T('Диалог') });
     const api = { el: body, close: () => { Ui.sheets = Ui.sheets.filter(s => s !== api); scrim.classList.remove('on'); sheet.classList.remove('on'); setTimeout(() => { scrim.remove(); sheet.remove(); if (!Ui.sheets.length) root.style.pointerEvents = 'none'; }, 220); if (opt.onClose) opt.onClose(); } };
     if (opt.title) sheet.append(h('div', { class: 'rowb', style: 'margin-bottom:12px' }, h('h2', { text: opt.title }),
-      opt.noClose ? null : h('button', { class: 'ibtn', 'aria-label': 'Закрыть', onclick: api.close }, icon('close'))));
+      opt.noClose ? null : h('button', { class: 'ibtn', 'aria-label': T('Закрыть'), onclick: api.close }, icon('close'))));
     sheet.append(body);
     if (opt.actions && opt.actions.length) {
       sheet.append(h('div', { class: 'row wrap', style: 'margin-top:16px;justify-content:flex-end' },
@@ -147,7 +147,7 @@ const Ui = {
       const fin = v => { if (!done) { done = true; res(v); } };
       const s = this.sheet({
         title, onClose: () => fin(false),
-        actions: [{ label: 'Отмена', kind: 'sec', onClick: () => fin(false) }, { label: okLabel || 'Подтвердить', kind: danger ? 'dng' : 'pri', onClick: () => fin(true) }]
+        actions: [{ label: T('Отмена'), kind: 'sec', onClick: () => fin(false) }, { label: okLabel || T('Подтвердить'), kind: danger ? 'dng' : 'pri', onClick: () => fin(true) }]
       });
       s.el.append(h('p', { text, style: 'margin:0' }));
     });
@@ -159,15 +159,15 @@ const Ui = {
   },
   input(type, ph, val) { const i = h('input', { class: 'inp', type: type || 'text', placeholder: ph || '' }); if (val != null) i.value = val; return i; },
   statusChip(s) {
-    const m = { planned: ['Запланирован', 'chip'], waiting: ['Пациент ожидает', 'chip o'], in_progress: ['Идёт', 'chip g'], completed: ['Завершён', 'chip'] };
+    const m = { planned: [T('Запланирован'), 'chip'], waiting: [T('Пациент ожидает'), 'chip o'], in_progress: [T('Идёт'), 'chip g'], completed: [T('Завершён'), 'chip'] };
     const x = m[s] || m.planned;
     return h('span', { class: x[1], text: x[0] });
   },
   async copy(text, msg) {
-    try { await navigator.clipboard.writeText(text); Toast.show(msg || 'Скопировано'); }
+    try { await navigator.clipboard.writeText(text); Toast.show(msg || T('Скопировано')); }
     catch (e) {
       const t = h('textarea', { style: 'position:fixed;opacity:0' }); t.value = text; document.body.append(t); t.select();
-      try { document.execCommand('copy'); Toast.show(msg || 'Скопировано'); } catch (e2) { Toast.err('Не удалось скопировать'); }
+      try { document.execCommand('copy'); Toast.show(msg || T('Скопировано')); } catch (e2) { Toast.err(T('Не удалось скопировать')); }
       t.remove();
     }
   },
@@ -188,11 +188,22 @@ const Ui = {
   /* заметная кнопка режима на первом экране пациента: до согласия и проверки камеры */
   bigToggle() {
     const b = h('button', { class: 'btn sec bigtoggle', 'aria-pressed': String(this.isBig()) }, icon('text'), h('span'));
-    const paint = () => { b.setAttribute('aria-pressed', String(this.isBig())); b.lastChild.textContent = this.isBig() ? 'Обычный вид' : 'Крупно и контрастно'; };
+    const paint = () => { b.setAttribute('aria-pressed', String(this.isBig())); b.lastChild.textContent = this.isBig() ? T('Обычный вид') : T('Крупно и контрастно'); };
     b.onclick = () => { this.big(); paint(); Header.update(); };
     paint();
     return b;
   },
+  /* язык интерфейса: сохраняется в браузере, страница перезагружается (строки собираются при загрузке) */
+  async setLang(l) {
+    if (!LANGS.includes(l) || l === LANG) return;
+    if (State.v.view === 'call' && !(await this.confirm(T('Сменить язык?'), T('Страница перезагрузится, звонок подключится заново.'), T('Сменить')))) return;
+    try { localStorage.setItem('mars_lang', l); } catch (e) { /* без хранилища: язык из адреса */ }
+    const u = new URL(location.href); u.searchParams.set('lang', l); location.replace(u.toString());
+  },
+  /* название другого языка на нём самом: его узнают, даже не читая текущий */
+  otherLang() { return LANG === 'ru' ? 'en' : 'ru'; },
+  langName(l) { return l === 'en' ? 'English' : 'Русский'; },
+  langToggle() { const o = this.otherLang(); return h('button', { class: 'btn sec', lang: o, onclick: () => this.setLang(o) }, icon('text'), this.langName(o)); },
   sound() {
     try {
       const AC = window.AudioContext || window.webkitAudioContext; if (!AC) return;
@@ -218,10 +229,10 @@ const Api = {
     if (tok && path.startsWith('/rooms')) hd['Authorization'] = 'Bearer ' + tok;
     let res;
     try { res = await fetch(path, { method, headers: hd, body, signal: opt.signal, credentials: 'same-origin', keepalive: !!opt.keepalive }); }
-    catch (e) { if (e && e.name === 'AbortError') throw e; throw new ApiErr(0, 'network', 'Нет связи с сервером'); }
+    catch (e) { if (e && e.name === 'AbortError') throw e; throw new ApiErr(0, 'network', T('Нет связи с сервером')); }
     if (opt.blob && res.ok) return res.blob();
     let data = null; try { data = await res.json(); } catch (e) { /* не JSON */ }
-    if (!res.ok) throw new ApiErr(res.status, (data && data.error) || 'error', (data && data.message) || ('Ошибка ' + res.status));
+    if (!res.ok) throw new ApiErr(res.status, (data && data.error) || 'error', T((data && data.message) || '') || (T('Ошибка ') + res.status));
     return data;
   },
   get(p, o) { return this.req('GET', p, o); },

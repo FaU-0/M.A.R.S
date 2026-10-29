@@ -18,28 +18,29 @@ const Header = {
     const v = State.v, inRoom = !!Api.room && v.view === 'call';
     const kids = [h('div', { class: 'brand' }, Cfg.center, ' ', h('span', { text: 'M.A.R.S.' })), h('div', { class: 'sp' })];
     const down = Services.down();
-    if (down.length) kids.push(h('div', { class: 'net', role: 'status', title: 'Недоступны: ' + down.join(', ') }, h('span', { class: 'dot bad' }), h('span', { class: 'only-wide', text: 'Сервисы: ' + down.length })));
-    kids.push(h('div', { class: 'net', role: 'status' }, h('span', { class: 'dot ' + (v.net ? 'ok' : 'bad') }), h('span', { class: 'only-wide', text: v.net ? 'В сети' : 'Нет связи' })));
-    if (inRoom) kids.push(h('div', { class: 'codebox' }, h('span', { class: 'mut', text: 'Код' }), h('span', { class: 'mono', text: Api.room }),
-      h('button', { class: 'ibtn', style: 'width:32px;height:32px', 'aria-label': 'Скопировать код сессии', title: 'Скопировать код', onclick: () => Ui.copy(Api.room, 'Код скопирован') }, icon('copy'))));
+    if (down.length) kids.push(h('div', { class: 'net', role: 'status', title: T('Недоступны: ') + down.join(', ') }, h('span', { class: 'dot bad' }), h('span', { class: 'only-wide', text: T('Сервисы: ') + down.length })));
+    kids.push(h('div', { class: 'net', role: 'status' }, h('span', { class: 'dot ' + (v.net ? 'ok' : 'bad') }), h('span', { class: 'only-wide', text: v.net ? T('В сети') : T('Нет связи') })));
+    if (inRoom) kids.push(h('div', { class: 'codebox' }, h('span', { class: 'mut', text: T('Код') }), h('span', { class: 'mono', text: Api.room }),
+      h('button', { class: 'ibtn', style: 'width:32px;height:32px', 'aria-label': T('Скопировать код сессии'), title: T('Скопировать код'), onclick: () => Ui.copy(Api.room, T('Код скопирован')) }, icon('copy'))));
     const big = Ui.isBig();
-    kids.push(h('button', { class: 'ibtn', 'aria-label': 'Крупно и контрастно', 'aria-pressed': String(big), title: big ? 'Обычный вид' : 'Крупно и контрастно', onclick: () => { Ui.big(); this.update(); } }, icon('text')));
-    kids.push(h('button', { class: 'ibtn', 'aria-label': 'Меню', title: 'Меню', onclick: () => this.menu() }, icon('menu')));
+    kids.push(h('button', { class: 'ibtn', 'aria-label': T('Крупно и контрастно'), 'aria-pressed': String(big), title: big ? T('Обычный вид') : T('Крупно и контрастно'), onclick: () => { Ui.big(); this.update(); } }, icon('text')));
+    kids.push(h('button', { class: 'ibtn', 'aria-label': T('Меню'), title: T('Меню'), onclick: () => this.menu() }, icon('menu')));
     this.el.replaceChildren(...kids);
   },
   menu() {
     const v = State.v, inRoom = !!Api.room && v.view === 'call', doc = v.role === 'doctor';
-    const s = Ui.sheet({ title: 'Меню' });
+    const s = Ui.sheet({ title: T('Меню') });
     const item = (ic, text, fn, danger) => h('button', { class: 'li', style: 'width:100%;text-align:left' + (danger ? ';color:var(--badt)' : ''), onclick: async () => { s.close(); await fn(); } }, icon(ic), h('span', { class: 'grow', text }));
     const list = h('div', { class: 'list' });
-    if (doc || (Auth.doctor && v.view !== 'join')) list.append(item('calendar', 'Приёмы', () => App.toAppointments()));
-    if (Auth.doctor && Auth.doctor.admin) list.append(item('list', 'Журнал аудита', () => App.auditSheet()));
-    list.append(item('text', Ui.isBig() ? 'Обычный вид' : 'Крупно и контрастно', () => { Ui.big(); this.update(); }));
+    if (doc || (Auth.doctor && v.view !== 'join')) list.append(item('calendar', T('Приёмы'), () => App.toAppointments()));
+    if (Auth.doctor && Auth.doctor.admin) list.append(item('list', T('Журнал аудита'), () => App.auditSheet()));
+    list.append(item('text', Ui.isBig() ? T('Обычный вид') : T('Крупно и контрастно'), () => { Ui.big(); this.update(); }));
+    list.append(item('text', Ui.langName(Ui.otherLang()), () => Ui.setLang(Ui.otherLang())));
     if (inRoom && doc) {
-      list.append(item('user', 'Освободить место пациента', async () => { try { await Api.ev('control', { action: 'reset_patient' }); Toast.show('Пациент сможет войти заново по ссылке'); } catch (e) { Toast.err(e); } }));
-      list.append(item('alert', 'Экстренное завершение', () => App.emergency(), true));
+      list.append(item('user', T('Освободить место пациента'), async () => { try { await Api.ev('control', { action: 'reset_patient' }); Toast.show(T('Пациент сможет войти заново по ссылке')); } catch (e) { Toast.err(e); } }));
+      list.append(item('alert', T('Экстренное завершение'), () => App.emergency(), true));
     }
-    if (Auth.doctor && Cfg.auth) list.append(item('logout', 'Выйти', () => Auth.logout()));
+    if (Auth.doctor && Cfg.auth) list.append(item('logout', T('Выйти'), () => Auth.logout()));
     s.el.append(list);
   }
 };
@@ -50,35 +51,35 @@ const CallUi = {
   build() {
     const isDoc = State.v.role === 'doctor', R = this.r = {};
     this.panes = {}; this.tabBtn = {}; this.t0 = 0;
-    R.remote = h('video', { autoplay: true, playsinline: true, 'aria-label': 'Видео собеседника' });
+    R.remote = h('video', { autoplay: true, playsinline: true, 'aria-label': T('Видео собеседника') });
     R.ovR = h('canvas', { class: 'ov' });
     R.stage = h('div', { class: 'vstage' }, R.remote, R.ovR);
-    R.local = h('video', { autoplay: true, playsinline: true, class: 'mirror', 'aria-label': 'Ваше видео' }); R.local.muted = true;
+    R.local = h('video', { autoplay: true, playsinline: true, class: 'mirror', 'aria-label': T('Ваше видео') }); R.local.muted = true;
     R.ovL = h('canvas', { class: 'ov mirror' });
-    R.self = h('div', { class: 'selfview', 'aria-label': 'Самовидение, можно перетаскивать' }, R.local, R.ovL);
+    R.self = h('div', { class: 'selfview', 'aria-label': T('Самовидение, можно перетаскивать') }, R.local, R.ovL);
     R.qdot = h('span', { class: 'dot' }); R.qtxt = h('span', { class: 'sm', text: '' }); R.timer = h('span', { class: 'mono sm', text: '00:00' });
-    const peer = isDoc ? (App.proto.appointment && App.proto.appointment.patient_name) || 'Пациент' : (App.proto.appointment && App.proto.appointment.doctor) || 'Врач';
+    const peer = isDoc ? (App.proto.appointment && App.proto.appointment.patient_name) || T('Пациент') : T(App.proto.appointment && App.proto.appointment.doctor) || T('Врач');
     R.vtop = h('div', { class: 'vtop' }, h('span', { class: 'grow', text: peer }), R.qdot, R.qtxt, R.timer);
     R.vmsg = h('div', { class: 'vmsg' });
     R.hint = h('div', { class: 'hint', role: 'status', 'aria-live': 'polite' });
     R.pq = h('div', { class: 'pqual hidden' });
     /* подпись под каждой кнопкой (data-short): иконка без слов непонятна; на телефоне класс wide-only прячет лишнее */
     const cb = (name, label, fn, short, wideOnly) => h('button', { class: 'cb' + (wideOnly ? ' wide-only' : ''), 'aria-label': label, title: label, 'data-short': short, 'aria-pressed': 'false', onclick: fn }, icon(name));
-    R.bMic = cb('mic', 'Микрофон (M)', () => this.toggleMic(), 'Микрофон');
-    R.bCam = cb('video', 'Камера (V)', () => this.toggleCam(), 'Камера');
-    R.bScr = cb('screen', 'Демонстрация экрана', async e => { if (Media.sharing) await Media.stopShare(); else await Media.shareScreen(); }, 'Экран', true);
-    R.bMesh = cb('mesh', isDoc ? 'Сетка лица (F)' : 'Задания для лица', () => { if (isDoc) FaceMesh.toggle(); else FaceMesh.openTasks(); }, isDoc ? 'Сетка' : 'Задания', !isDoc);
-    R.bMore = cb('more', 'Ещё', () => this.moreSheet(), 'Ещё');
-    R.bEnd = cb('end', isDoc ? 'Завершить приём' : 'Выйти', () => this.endClick(), isDoc ? 'Завершить' : 'Выйти'); R.bEnd.classList.add('end');
+    R.bMic = cb('mic', T('Микрофон (M)'), () => this.toggleMic(), T('Микрофон'));
+    R.bCam = cb('video', T('Камера (V)'), () => this.toggleCam(), T('Камера'));
+    R.bScr = cb('screen', T('Демонстрация экрана'), async e => { if (Media.sharing) await Media.stopShare(); else await Media.shareScreen(); }, T('Экран'), true);
+    R.bMesh = cb('mesh', isDoc ? T('Сетка лица (F)') : T('Задания для лица'), () => { if (isDoc) FaceMesh.toggle(); else FaceMesh.openTasks(); }, isDoc ? T('Сетка') : T('Задания'), !isDoc);
+    R.bMore = cb('more', T('Ещё'), () => this.moreSheet(), T('Ещё'));
+    R.bEnd = cb('end', isDoc ? T('Завершить приём') : T('Выйти'), () => this.endClick(), isDoc ? T('Завершить') : T('Выйти')); R.bEnd.classList.add('end');
     const bar = [R.bMic, R.bCam, R.bScr, R.bMesh];
-    if (!isDoc) { R.bSide = cb('chat', 'Чат и файлы', () => { R.layout.classList.toggle('noside'); R.bSide.setAttribute('aria-pressed', String(!R.layout.classList.contains('noside'))); if (window.matchMedia('(max-width:700px)').matches) this.showTab('chat'); }, 'Чат', true); bar.push(R.bSide); }
+    if (!isDoc) { R.bSide = cb('chat', T('Чат и файлы'), () => { R.layout.classList.toggle('noside'); R.bSide.setAttribute('aria-pressed', String(!R.layout.classList.contains('noside'))); if (window.matchMedia('(max-width:700px)').matches) this.showTab('chat'); }, T('Чат'), true); bar.push(R.bSide); }
     bar.push(R.bMore, R.bEnd);
-    R.bar = h('div', { class: 'callbar', role: 'toolbar', 'aria-label': 'Управление звонком' }, bar);
+    R.bar = h('div', { class: 'callbar', role: 'toolbar', 'aria-label': T('Управление звонком') }, bar);
     R.wrap = h('div', { class: 'callwrap' }, R.stage, R.self, R.vtop, R.vmsg, R.pq, R.hint, R.bar);
     R.center = h('div', { class: 'center' }, R.wrap);
     /* панели */
-    const tabs = isDoc ? [['card', 'Карточка', 'user'], ['face', 'Лицо', 'face'], ['chat', 'Чат', 'chat'], ['files', 'Файлы', 'file'], ['tr', 'Расшифровка', 'text'], ['concl', 'Заключение', 'doc']]
-      : [['chat', 'Чат', 'chat'], ['files', 'Файлы', 'file'], ['face', 'Задания', 'face']];
+    const tabs = isDoc ? [['card', T('Карточка'), 'user'], ['face', T('Лицо'), 'face'], ['chat', T('Чат'), 'chat'], ['files', T('Файлы'), 'file'], ['tr', T('Расшифровка'), 'text'], ['concl', T('Заключение'), 'doc']]
+      : [['chat', T('Чат'), 'chat'], ['files', T('Файлы'), 'file'], ['face', T('Задания'), 'face']];
     const content = {
       chat: Chat.build(), files: Files.build(),
       face: isDoc ? FaceMesh.doctorPane() : FaceMesh.patientPane()
@@ -88,7 +89,7 @@ const CallUi = {
     if (isDoc) this.panes.card.append(R.cardBody);
     R.tabs = h('div', { class: 'tabs', role: 'tablist' }, tabs.map(([k, label]) => { const b = h('button', { role: 'tab', 'aria-selected': 'false', onclick: () => this.showTab(k) }, label); this.tabBtn[k] = b; return b; }));
     R.rside = h('aside', { class: 'rside' }, R.tabs, tabs.map(([k]) => this.panes[k]));
-    R.pbar = h('nav', { class: 'pbar', 'aria-label': 'Разделы' }, [h('button', { 'aria-selected': 'true', 'data-t': 'video', onclick: () => this.showTab('video') }, icon('video'), 'Видео')].concat(tabs.map(([k, label, ic]) => h('button', { 'aria-selected': 'false', 'data-t': k, onclick: () => this.showTab(k) }, icon(ic), label))));
+    R.pbar = h('nav', { class: 'pbar', 'aria-label': T('Разделы') }, [h('button', { 'aria-selected': 'true', 'data-t': 'video', onclick: () => this.showTab('video') }, icon('video'), T('Видео'))].concat(tabs.map(([k, label, ic]) => h('button', { 'aria-selected': 'false', 'data-t': k, onclick: () => this.showTab(k) }, icon(ic), label))));
     R.lside = isDoc ? h('aside', { class: 'lside' }) : null;
     R.layout = h('div', { class: 'dlayout' + (isDoc ? '' : ' pat noside'), 'data-ptab': 'video' }, R.lside, R.center, R.rside, R.pbar);
     $('#main').replaceChildren(R.layout);
@@ -151,21 +152,21 @@ const CallUi = {
     const R = this.r; if (!R.vmsg) return;
     const v = State.v, isDoc = v.role === 'doctor';
     let title = '', sub = '', btn = false, show = true;
-    if (v.status === 'completed') { title = 'Консультация завершена'; sub = isDoc ? 'Заполните заключение и отправьте его пациенту.' : 'Спасибо. Документы от врача появятся в чате и в разделе «Файлы».'; }
+    if (v.status === 'completed') { title = T('Консультация завершена'); sub = isDoc ? T('Заполните заключение и отправьте его пациенту.') : T('Спасибо. Документы от врача появятся в чате и в разделе «Файлы».'); }
     else if (v.status === 'in_progress') {
       if (v.rtc === 'connected') show = false;
-      else { title = v.rtc === 'reconnecting' ? 'Восстанавливаю связь' : 'Подключение'; sub = isDoc ? (v.peerHere ? 'Устанавливаю соединение с пациентом' : 'Ждём подключения пациента') : 'Ожидаем подключения врача'; }
-    } else if (isDoc) { title = v.peerHere ? 'Пациент ожидает' : 'Ожидаем пациента'; sub = v.peerHere ? 'Укажите адрес и телефон пациента и начните приём' : 'Пациент ещё не вошёл в комнату'; btn = true; }
-    else { title = 'Врач скоро подключится'; sub = 'Оставайтесь на этой странице'; }
+      else { title = v.rtc === 'reconnecting' ? T('Восстанавливаю связь') : T('Подключение'); sub = isDoc ? (v.peerHere ? T('Устанавливаю соединение с пациентом') : T('Ждём подключения пациента')) : T('Ожидаем подключения врача'); }
+    } else if (isDoc) { title = v.peerHere ? T('Пациент ожидает') : T('Ожидаем пациента'); sub = v.peerHere ? T('Укажите адрес и телефон пациента и начните приём') : T('Пациент ещё не вошёл в комнату'); btn = true; }
+    else { title = T('Врач скоро подключится'); sub = T('Оставайтесь на этой странице'); }
     R.vmsg.classList.toggle('hidden', !show);
     /* replaceChildren(null) выводит слово «null»: пустые элементы отбрасываются */
     if (show) R.vmsg.replaceChildren(...[h('h2', { text: title }), h('p', { style: 'margin:0;opacity:.8', text: sub }),
-      btn ? h('button', { class: 'btn pri lg', onclick: () => this.start() }, 'Начать приём') : null].filter(Boolean));
-    const q = v.quality, L = { good: ['ok', 'Связь: хорошая'], mid: ['mid', 'Связь: средняя'], bad: ['bad', 'Связь: плохая'] }[q ? q.level : ''];
-    R.qdot.className = 'dot ' + (L ? L[0] : ''); R.qtxt.textContent = L ? L[1] : (v.rtc === 'reconnecting' ? 'Переподключение' : '');
+      btn ? h('button', { class: 'btn pri lg', onclick: () => this.start() }, T('Начать приём')) : null].filter(Boolean));
+    const q = v.quality, L = { good: ['ok', T('Связь: хорошая')], mid: ['mid', T('Связь: средняя')], bad: ['bad', T('Связь: плохая')] }[q ? q.level : ''];
+    R.qdot.className = 'dot ' + (L ? L[0] : ''); R.qtxt.textContent = L ? L[1] : (v.rtc === 'reconnecting' ? T('Переподключение') : '');
   },
   async start() {
-    if (!Record.locOk()) { Toast.show('Укажите адрес и телефон пациента'); this.showTab('card'); Record.focusLoc(); return; }
+    if (!Record.locOk()) { Toast.show(T('Укажите адрес и телефон пациента')); this.showTab('card'); Record.focusLoc(); return; }
     try {
       await Record.saveLocation();
       await Api.ev('control', { action: 'start' });
@@ -173,24 +174,24 @@ const CallUi = {
       await Rtc.startAsDoctor();
     } catch (e) { Toast.err(e); }
   },
-  peerLeft() { Toast.show('Собеседник отключился', null, 5000); State.set({ peerHere: false }); this.refresh(); },
+  peerLeft() { Toast.show(T('Собеседник отключился'), null, 5000); State.set({ peerHere: false }); this.refresh(); },
   async endClick() {
     if (State.v.role === 'doctor') {
       if (State.v.status === 'completed') return;
-      if (!(await Ui.confirm('Завершить приём?', 'Видеосвязь будет закрыта. Затем можно заполнить заключение.', 'Завершить', true))) return;
+      if (!(await Ui.confirm(T('Завершить приём?'), T('Видеосвязь будет закрыта. Затем можно заполнить заключение.'), T('Завершить'), true))) return;
       try { await Api.ev('control', { action: 'end' }); } catch (e) { Toast.err(e); return; }
       Events.ended(); this.showTab('concl');
-      Ui.sheet({ title: 'Приём завершён', actions: [{ label: 'Позже', kind: 'sec' }, { label: 'Заполнить заключение', kind: 'pri', onClick: () => { this.showTab('concl'); } }] }).el.append(h('p', { style: 'margin:0', text: 'Заполните заключение консультации и отправьте его пациенту.' }));
+      Ui.sheet({ title: T('Приём завершён'), actions: [{ label: T('Позже'), kind: 'sec' }, { label: T('Заполнить заключение'), kind: 'pri', onClick: () => { this.showTab('concl'); } }] }).el.append(h('p', { style: 'margin:0', text: T('Заполните заключение консультации и отправьте его пациенту.') }));
     } else {
-      if (!(await Ui.confirm('Покинуть консультацию?', 'Вы сможете вернуться по той же ссылке, пока врач не завершит приём.', 'Выйти', true))) return;
+      if (!(await Ui.confirm(T('Покинуть консультацию?'), T('Вы сможете вернуться по той же ссылке, пока врач не завершит приём.'), T('Выйти'), true))) return;
       try { await Api.ev('presence', { state: 'left' }); } catch (e) { /* ignore */ }
       App.teardown();
-      $('#main').replaceChildren(h('div', { class: 'center-col' }, h('h1', { text: 'Вы вышли из консультации' }), h('p', { class: 'mut', text: 'Чтобы вернуться, откройте ссылку-приглашение ещё раз.' }),
-        h('button', { class: 'btn pri lg', onclick: () => location.reload() }, 'Вернуться')));
+      $('#main').replaceChildren(h('div', { class: 'center-col' }, h('h1', { text: T('Вы вышли из консультации') }), h('p', { class: 'mut', text: T('Чтобы вернуться, откройте ссылку-приглашение ещё раз.') }),
+        h('button', { class: 'btn pri lg', onclick: () => location.reload() }, T('Вернуться'))));
     }
   },
   async moreSheet() {
-    const s = Ui.sheet({ title: 'Ещё' });
+    const s = Ui.sheet({ title: T('Ещё') });
     const d = await Media.devices();
     const mk = (label, list, kind) => {
       const sel = h('select', { class: 'inp' }); list.forEach((x, i) => sel.append(h('option', { value: x.deviceId, text: x.label || (label + ' ' + (i + 1)) })));
@@ -198,17 +199,17 @@ const CallUi = {
       sel.onchange = async () => { try { await Media.switchDevice(kind, sel.value); } catch (e) { Toast.show(Media.explain(e), 'err', 6000); } };
       return Ui.field(label, sel);
     };
-    s.el.append(mk('Камера', d.v, 'v'), mk('Микрофон', d.a, 'a'));
-    const ao = h('button', { class: 'btn sec', onclick: () => { Media.setAudioOnly(Media.camOn); this.syncBtns(); ao.textContent = Media.camOn ? 'Включить режим «Только аудио»' : 'Выключить режим «Только аудио»'; } }, icon('audio'), Media.camOn ? 'Включить режим «Только аудио»' : 'Выключить режим «Только аудио»');
-    const fs = h('button', { class: 'btn sec', onclick: () => { s.close(); this.fullscreen(); } }, icon('full'), 'Полный экран');
-    const big = h('button', { class: 'btn sec', onclick: () => { Ui.big(); Header.update(); s.close(); } }, icon('text'), Ui.isBig() ? 'Обычный вид' : 'Крупно и контрастно');
-    const sp = State.v.role === 'doctor' ? h('button', { class: 'btn sec', onclick: () => { s.close(); Speech.request(); } }, icon('audio'), Speech.on ? 'Остановить расшифровку речи' : 'Включить расшифровку речи') : null;
+    s.el.append(mk(T('Камера'), d.v, 'v'), mk(T('Микрофон'), d.a, 'a'));
+    const ao = h('button', { class: 'btn sec', onclick: () => { Media.setAudioOnly(Media.camOn); this.syncBtns(); ao.textContent = Media.camOn ? T('Включить режим «Только аудио»') : T('Выключить режим «Только аудио»'); } }, icon('audio'), Media.camOn ? T('Включить режим «Только аудио»') : T('Выключить режим «Только аудио»'));
+    const fs = h('button', { class: 'btn sec', onclick: () => { s.close(); this.fullscreen(); } }, icon('full'), T('Полный экран'));
+    const big = h('button', { class: 'btn sec', onclick: () => { Ui.big(); Header.update(); s.close(); } }, icon('text'), Ui.isBig() ? T('Обычный вид') : T('Крупно и контрастно'));
+    const sp = State.v.role === 'doctor' ? h('button', { class: 'btn sec', onclick: () => { s.close(); Speech.request(); } }, icon('audio'), Speech.on ? T('Остановить расшифровку речи') : T('Включить расшифровку речи')) : null;
     s.el.append(h('div', { class: 'stack' }, ao, fs, big, sp));
   },
   fullscreen() {
     const el = this.r.wrap; if (!el) return;
     if (document.fullscreenElement) { document.exitFullscreen(); return; }
-    const f = el.requestFullscreen || el.webkitRequestFullscreen; if (f) { const p = f.call(el); if (p && p.catch) p.catch(() => Toast.show('Полный экран недоступен')); } else Toast.show('Полный экран недоступен в этом браузере');
+    const f = el.requestFullscreen || el.webkitRequestFullscreen; if (f) { const p = f.call(el); if (p && p.catch) p.catch(() => Toast.show(T('Полный экран недоступен'))); } else Toast.show(T('Полный экран недоступен в этом браузере'));
   },
   makeDraggable(el, box) {
     let sx = 0, sy = 0, ox = 0, oy = 0, drag = false;
@@ -237,13 +238,13 @@ const Events = {
   presence(d) {
     const doc = State.v.role === 'doctor';
     if (d.state === 'waiting') { const was = State.v.peerHere; if (doc) this.patientWaiting(was); else State.set({ peerHere: true }); }
-    else if (d.state === 'online') { State.set({ peerHere: true }); if (doc && State.v.status === 'in_progress' && !(Rtc.pc && State.v.rtc === 'connected')) { Rtc.hardRestart(); Toast.show('Пациент подключился заново'); } }
+    else if (d.state === 'online') { State.set({ peerHere: true }); if (doc && State.v.status === 'in_progress' && !(Rtc.pc && State.v.rtc === 'connected')) { Rtc.hardRestart(); Toast.show(T('Пациент подключился заново')); } }
     else if (d.state === 'left') { CallUi.peerLeft(); }
   },
   patientWaiting(silent) {
     const first = !State.v.peerHere;
     State.set({ peerHere: true, status: State.v.status === 'in_progress' ? 'in_progress' : 'waiting' });
-    if (!silent && first) { Ui.sound(); Toast.show('Пациент ожидает в комнате', null, 6000); }
+    if (!silent && first) { Ui.sound(); Toast.show(T('Пациент ожидает в комнате'), null, 6000); }
   },
   control(d) {
     const doc = State.v.role === 'doctor';
@@ -271,11 +272,11 @@ const Chat = {
   seen: new Set(), list: null, input: null,
   build() {
     this.seen = new Set();
-    this.list = h('div', { class: 'msgs', role: 'log', 'aria-live': 'polite', 'aria-label': 'Сообщения' });
-    this.input = h('textarea', { class: 'inp', rows: 1, placeholder: 'Сообщение', 'aria-label': 'Текст сообщения', style: 'min-height:44px;height:44px;resize:none' });
+    this.list = h('div', { class: 'msgs', role: 'log', 'aria-live': 'polite', 'aria-label': T('Сообщения') });
+    this.input = h('textarea', { class: 'inp', rows: 1, placeholder: T('Сообщение'), 'aria-label': T('Текст сообщения'), style: 'min-height:44px;height:44px;resize:none' });
     this.input.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); this.send(); } });
     return h('div', { class: 'stack', style: 'flex:1;min-height:0' }, this.list,
-      h('div', { class: 'sheetrow' }, this.input, h('button', { class: 'ibtn', style: 'background:var(--acc);color:var(--onacc)', 'aria-label': 'Отправить', onclick: () => this.send() }, icon('send'))));
+      h('div', { class: 'sheetrow' }, this.input, h('button', { class: 'ibtn', style: 'background:var(--acc);color:var(--onacc)', 'aria-label': T('Отправить'), onclick: () => this.send() }, icon('send'))));
   },
   async send() {
     const text = this.input.value.trim(); if (!text) return;
@@ -287,7 +288,7 @@ const Chat = {
     const mine = ev.from === State.v.role;
     const m = h('div', { class: 'msg' + (mine ? ' me' : '') }, body, h('span', { class: 'tm', text: fmtTime(ev.ts) }));
     this.list.append(m); this.focusEnd();
-    if (!mine && CallUi.curTab !== 'chat' && State.v.view === 'call') Toast.show('Новое сообщение');
+    if (!mine && CallUi.curTab !== 'chat' && State.v.view === 'call') Toast.show(T('Новое сообщение'));
     return m;
   },
   focusEnd() { if (this.list) this.list.scrollTop = this.list.scrollHeight; },
@@ -298,8 +299,8 @@ const Chat = {
   addFile(ev, node) { this.push(ev, node); },
   addDoc(ev) {
     const d = ev.data || {}; const k = 'd' + d.mid; if (this.seen.has(k)) return; this.seen.add(k);
-    this.push(ev, h('div', { class: 'stack', style: 'gap:6px' }, h('strong', { text: 'Заключение консультации' }), h('span', { class: 'sm', text: d.doctor ? 'Врач: ' + d.doctor : '' }),
-      h('div', { class: 'row wrap' }, h('button', { class: 'btn sec', onclick: () => Print.conclusion(d) }, icon('doc'), 'Открыть и распечатать'),
+    this.push(ev, h('div', { class: 'stack', style: 'gap:6px' }, h('strong', { text: T('Заключение консультации') }), h('span', { class: 'sm', text: d.doctor ? T('Врач: ') + d.doctor : '' }),
+      h('div', { class: 'row wrap' }, h('button', { class: 'btn sec', onclick: () => Print.conclusion(d) }, icon('doc'), T('Открыть и распечатать')),
         h('button', { class: 'btn sec', onclick: () => Ui.download('zaklyuchenie.json', JSON.stringify(d, null, 2)) }, icon('download'), 'JSON'))));
     Files.addDocRow(ev);
   }
@@ -314,8 +315,8 @@ const Files = {
     const inp = h('input', { type: 'file', class: 'hidden', accept: EXT_OK.join(','), onchange: () => { for (const f of inp.files) this.upload(f); inp.value = ''; } });
     this.box = h('div', { class: 'list' });
     const drop = h('div', { class: 'stack', style: 'flex:1;min-height:0;overflow:auto' },
-      h('button', { class: 'btn sec', onclick: () => inp.click() }, icon('upload'), 'Прикрепить файл'),
-      h('p', { class: 'note', style: 'margin:0', text: 'PDF, JPEG, PNG, CSV, XLSX, XLS, до 20 МБ.' }), inp, this.box);
+      h('button', { class: 'btn sec', onclick: () => inp.click() }, icon('upload'), T('Прикрепить файл')),
+      h('p', { class: 'note', style: 'margin:0', text: T('PDF, JPEG, PNG, CSV, XLSX, XLS, до 20 МБ.') }), inp, this.box);
     drop.addEventListener('dragover', e => e.preventDefault());
     drop.addEventListener('drop', e => { e.preventDefault(); for (const f of e.dataTransfer.files) this.upload(f); });
     return drop;
@@ -323,30 +324,30 @@ const Files = {
   history() { /* история файлов и снимков для левой панели строится в Record.cardPane */ },
   upload(file) {
     const ext = (file.name.match(/\.[^.]+$/) || [''])[0].toLowerCase();
-    if (!EXT_OK.includes(ext)) { Toast.err('Недопустимый тип файла. Разрешены: PDF, JPEG, PNG, CSV, XLSX, XLS'); return; }
-    if (file.size > 20 * 1024 * 1024) { Toast.err('Файл больше 20 МБ'); return; }
-    if (file.size === 0) { Toast.err('Файл пустой'); return; }
+    if (!EXT_OK.includes(ext)) { Toast.err(T('Недопустимый тип файла. Разрешены: PDF, JPEG, PNG, CSV, XLSX, XLS')); return; }
+    if (file.size > 20 * 1024 * 1024) { Toast.err(T('Файл больше 20 МБ')); return; }
+    if (file.size === 0) { Toast.err(T('Файл пустой')); return; }
     const prog = h('progress', { max: 100, value: 0, style: 'width:100%' });
     const row = h('div', { class: 'li' }, icon('upload'), h('div', { class: 'grow' }, h('div', { class: 't', text: file.name }), prog));
     this.box.prepend(row);
     const fr = new FileReader();
-    fr.onerror = () => { row.remove(); Toast.err('Не удалось прочитать файл'); };
+    fr.onerror = () => { row.remove(); Toast.err(T('Не удалось прочитать файл')); };
     fr.onload = () => {
       const b64 = String(fr.result).split(',')[1] || '';
       const x = new XMLHttpRequest();
       x.open('POST', '/rooms/' + Api.room + '/events');
       x.setRequestHeader('Content-Type', 'application/json'); x.setRequestHeader('Authorization', 'Bearer ' + Api.token);
       x.upload.onprogress = e => { if (e.lengthComputable) prog.value = e.loaded / e.total * 100; };
-      x.onerror = () => { row.remove(); Toast.err('Нет связи при отправке файла'); };
+      x.onerror = () => { row.remove(); Toast.err(T('Нет связи при отправке файла')); };
       x.onload = () => {
         row.remove();
-        if (x.status !== 202) { let m = 'Файл не принят'; try { m = JSON.parse(x.responseText).message || m; } catch (e) { /* ignore */ } Toast.err(m); }
+        if (x.status !== 202) { let m = T('Файл не принят'); try { m = JSON.parse(x.responseText).message || m; } catch (e) { /* ignore */ } Toast.err(m); }
       };
       x.send(JSON.stringify({ type: 'file', data: { name: file.name, b64 } }));
     };
     fr.readAsDataURL(file);
   },
-  sizeText(n) { return n > 1048576 ? (n / 1048576).toFixed(1) + ' МБ' : Math.max(1, Math.round(n / 1024)) + ' КБ'; },
+  sizeText(n) { return n > 1048576 ? (n / 1048576).toFixed(1) + T(' МБ') : Math.max(1, Math.round(n / 1024)) + T(' КБ'); },
   async download(m) {
     try {
       const b = await Api.req('GET', '/rooms/' + Api.room + '/files/' + m.id, { blob: true });
@@ -355,20 +356,20 @@ const Files = {
   },
   add(ev) {
     const m = ev.data || {}; if (this.seen.has('f' + m.id)) return; this.seen.add('f' + m.id);
-    const dl = h('button', { class: 'ibtn', 'aria-label': 'Скачать ' + m.name, onclick: () => this.download(m) }, icon('download'));
+    const dl = h('button', { class: 'ibtn', 'aria-label': T('Скачать ') + m.name, onclick: () => this.download(m) }, icon('download'));
     if (this.box) this.box.prepend(h('div', { class: 'li' }, icon('file'), h('div', { class: 'grow' }, h('div', { class: 't', text: m.name }), h('div', { class: 'sm mut', text: this.sizeText(m.size) + ', ' + fmtTime(ev.ts) })), dl));
     const chatNode = h('div', { class: 'stack', style: 'gap:4px' }, h('div', { class: 'row' }, icon('file'), h('span', { text: m.name })), h('span', { class: 'sm', text: this.sizeText(m.size) }),
-      h('button', { class: 'btn sec', onclick: () => this.download(m) }, icon('download'), 'Скачать'));
+      h('button', { class: 'btn sec', onclick: () => this.download(m) }, icon('download'), T('Скачать')));
     if (/^image\//.test(m.mime || '')) {
-      const img = h('img', { class: 'pv', alt: 'Предпросмотр: ' + m.name }); chatNode.append(img);
+      const img = h('img', { class: 'pv', alt: T('Предпросмотр: ') + m.name }); chatNode.append(img);
       Api.req('GET', '/rooms/' + Api.room + '/files/' + m.id, { blob: true }).then(b => { img.src = URL.createObjectURL(b); }).catch(() => img.remove());
     }
     Chat.addFile(ev, chatNode);
   },
   addDocRow(ev) {
     const d = ev.data || {}; if (!this.box) return;
-    this.box.prepend(h('div', { class: 'li' }, icon('doc'), h('div', { class: 'grow' }, h('div', { class: 't', text: 'Заключение консультации' }), h('div', { class: 'sm mut', text: fmtTime(ev.ts) })),
-      h('button', { class: 'ibtn', 'aria-label': 'Открыть заключение', onclick: () => Print.conclusion(d) }, icon('doc'))));
+    this.box.prepend(h('div', { class: 'li' }, icon('doc'), h('div', { class: 'grow' }, h('div', { class: 't', text: T('Заключение консультации') }), h('div', { class: 'sm mut', text: fmtTime(ev.ts) })),
+      h('button', { class: 'ibtn', 'aria-label': T('Открыть заключение'), onclick: () => Print.conclusion(d) }, icon('doc'))));
   }
 };
 
@@ -395,27 +396,27 @@ const Print = {
   },
   conclusionLocal(d) {
     const c = d.conclusion || {}, row = (t, v) => [h('h2', { text: t }), h('p', { style: 'white-space:pre-wrap', text: v || '-' })];
-    this.go(h('div', null, h('h1', { text: d.center || Cfg.center }), h('h2', { text: 'Заключение консультации' }),
-      h('table', null, h('tr', null, h('th', { text: 'Пациент' }), h('td', { text: d.patient || '' })), h('tr', null, h('th', { text: 'Дата' }), h('td', { text: d.date || '' })), h('tr', null, h('th', { text: 'Врач' }), h('td', { text: d.doctor || '' }))),
-      row('Жалобы', c.complaints), row('Анамнез', c.anamnesis), row('Диагноз', c.diagnosis), row('Код МКБ-10', c.icd), row('Рекомендации', c.recommendations),
-      row('Повторный контакт', c.followup),
-      h('p', { class: 'sm', text: 'Документ сформирован по результатам дистанционной консультации. Это заключение консультации, а не электронный рецепт.' }),
-      h('div', { class: 'sign', text: 'Подпись врача ______________________ / ' + (d.doctor || '') + ' /' })));
+    this.go(h('div', null, h('h1', { text: T(d.center) || Cfg.center }), h('h2', { text: T('Заключение консультации') }),
+      h('table', null, h('tr', null, h('th', { text: T('Пациент') }), h('td', { text: d.patient || '' })), h('tr', null, h('th', { text: T('Дата') }), h('td', { text: d.date || '' })), h('tr', null, h('th', { text: T('Врач') }), h('td', { text: d.doctor || '' }))),
+      row(T('Жалобы'), c.complaints), row(T('Анамнез'), c.anamnesis), row(T('Диагноз'), c.diagnosis), row(T('Код МКБ-10'), c.icd), row(T('Рекомендации'), c.recommendations),
+      row(T('Повторный контакт'), c.followup),
+      h('p', { class: 'sm', text: T('Документ сформирован по результатам дистанционной консультации. Это заключение консультации, а не электронный рецепт.') }),
+      h('div', { class: 'sign', text: T('Подпись врача ______________________ / ') + (d.doctor || '') + ' /' })));
   }
 };
 
 /* ===== Карточка, заметки, заключение (врач) ===== */
 const ICD = [
-  ['A09', 'Инфекционный гастроэнтерит и колит'], ['B34.9', 'Вирусная инфекция неуточнённая'], ['E03.9', 'Гипотиреоз неуточнённый'], ['E11.9', 'Сахарный диабет 2 типа без осложнений'],
-  ['E66.9', 'Ожирение неуточнённое'], ['E78.5', 'Гиперлипидемия неуточнённая'], ['F32.9', 'Депрессивный эпизод неуточнённый'], ['F41.2', 'Смешанное тревожное и депрессивное расстройство'],
-  ['G43.9', 'Мигрень неуточнённая'], ['G47.0', 'Нарушения засыпания и поддержания сна'], ['I10', 'Эссенциальная гипертензия'], ['I20.9', 'Стенокардия неуточнённая'],
-  ['I25.1', 'Атеросклеротическая болезнь сердца'], ['I50.9', 'Сердечная недостаточность неуточнённая'], ['I83.9', 'Варикозное расширение вен нижних конечностей'],
-  ['J00', 'Острый назофарингит'], ['J02.9', 'Острый фарингит неуточнённый'], ['J03.9', 'Острый тонзиллит неуточнённый'], ['J06.9', 'Острая инфекция верхних дыхательных путей'],
-  ['J18.9', 'Пневмония неуточнённая'], ['J20.9', 'Острый бронхит неуточнённый'], ['J30.4', 'Аллергический ринит неуточнённый'], ['J45.9', 'Астма неуточнённая'],
-  ['K21.9', 'Гастроэзофагеальный рефлюкс без эзофагита'], ['K29.7', 'Гастрит неуточнённый'], ['K58.9', 'Синдром раздражённого кишечника'], ['K80.2', 'Камни жёлчного пузыря без холецистита'],
-  ['L20.9', 'Атопический дерматит неуточнённый'], ['L70.0', 'Угри обыкновенные'], ['L81.9', 'Нарушение пигментации неуточнённое'], ['L90.5', 'Рубцовые состояния и фиброз кожи'],
-  ['M25.5', 'Боль в суставе'], ['M54.2', 'Боль в области шеи'], ['M54.5', 'Боль внизу спины'], ['N39.0', 'Инфекция мочевыводящих путей'], ['N95.1', 'Менопауза'],
-  ['R50.9', 'Лихорадка неуточнённая'], ['R51', 'Головная боль'], ['Z09', 'Последующее наблюдение после лечения'], ['Z71.9', 'Консультирование неуточнённое']
+  ['A09', T('Инфекционный гастроэнтерит и колит')], ['B34.9', T('Вирусная инфекция неуточнённая')], ['E03.9', T('Гипотиреоз неуточнённый')], ['E11.9', T('Сахарный диабет 2 типа без осложнений')],
+  ['E66.9', T('Ожирение неуточнённое')], ['E78.5', T('Гиперлипидемия неуточнённая')], ['F32.9', T('Депрессивный эпизод неуточнённый')], ['F41.2', T('Смешанное тревожное и депрессивное расстройство')],
+  ['G43.9', T('Мигрень неуточнённая')], ['G47.0', T('Нарушения засыпания и поддержания сна')], ['I10', T('Эссенциальная гипертензия')], ['I20.9', T('Стенокардия неуточнённая')],
+  ['I25.1', T('Атеросклеротическая болезнь сердца')], ['I50.9', T('Сердечная недостаточность неуточнённая')], ['I83.9', T('Варикозное расширение вен нижних конечностей')],
+  ['J00', T('Острый назофарингит')], ['J02.9', T('Острый фарингит неуточнённый')], ['J03.9', T('Острый тонзиллит неуточнённый')], ['J06.9', T('Острая инфекция верхних дыхательных путей')],
+  ['J18.9', T('Пневмония неуточнённая')], ['J20.9', T('Острый бронхит неуточнённый')], ['J30.4', T('Аллергический ринит неуточнённый')], ['J45.9', T('Астма неуточнённая')],
+  ['K21.9', T('Гастроэзофагеальный рефлюкс без эзофагита')], ['K29.7', T('Гастрит неуточнённый')], ['K58.9', T('Синдром раздражённого кишечника')], ['K80.2', T('Камни жёлчного пузыря без холецистита')],
+  ['L20.9', T('Атопический дерматит неуточнённый')], ['L70.0', T('Угри обыкновенные')], ['L81.9', T('Нарушение пигментации неуточнённое')], ['L90.5', T('Рубцовые состояния и фиброз кожи')],
+  ['M25.5', T('Боль в суставе')], ['M54.2', T('Боль в области шеи')], ['M54.5', T('Боль внизу спины')], ['N39.0', T('Инфекция мочевыводящих путей')], ['N95.1', T('Менопауза')],
+  ['R50.9', T('Лихорадка неуточнённая')], ['R51', T('Головная боль')], ['Z09', T('Последующее наблюдение после лечения')], ['Z71.9', T('Консультирование неуточнённое')]
 ];
 const ICD_RE = /^[A-Z]\d{2}(\.\d{1,2})?$/;
 const Record = {
@@ -423,23 +424,23 @@ const Record = {
   deb(k, fn, ms) { clearTimeout(this.timers[k]); this.timers[k] = setTimeout(fn, ms || 800); },
   cardPane() {
     const mk = (key, label, el) => { this.f[key] = el; el.addEventListener('input', () => this.deb('card', () => this.saveCard())); return Ui.field(label, el); };
-    const sel = (opts) => { const s = h('select', { class: 'inp' }); for (const o of opts) s.append(h('option', { value: o, text: o || 'Не указано' })); return s; };
-    this.loc = { address: Ui.input('text', 'Город, улица, дом, квартира'), phone: Ui.input('tel', '+7 ...') };
+    const sel = (opts) => { const s = h('select', { class: 'inp' }); for (const o of opts) s.append(h('option', { value: o, text: o || T('Не указано') })); return s; };
+    this.loc = { address: Ui.input('text', T('Город, улица, дом, квартира')), phone: Ui.input('tel', '+7 ...') };
     for (const k in this.loc) this.loc[k].addEventListener('input', () => this.deb('loc', () => this.saveLocation().catch(() => { })));
-    this.notes = h('textarea', { class: 'inp', placeholder: 'Видны только врачу', rows: 4 });
+    this.notes = h('textarea', { class: 'inp', placeholder: T('Видны только врачу'), rows: 4 });
     this.notes.addEventListener('input', () => this.deb('notes', () => Api.post('/rooms/' + Api.room + '/protocol', { notes: this.notes.value }).catch(Toast.err)));
     const hist = Files.hist = h('div', { class: 'stack' });
     return h('div', { class: 'stack' },
-      h('div', { class: 'rowb' }, h('h3', { text: 'Пациент' }), h('span', { class: 'chip', text: 'со слов пациента' })),
-      mk('full_name', 'ФИО', Ui.input('text')), mk('birth', 'Дата рождения', Ui.input('date')),
-      mk('sex', 'Пол', sel(['', 'Женский', 'Мужской'])), mk('blood', 'Группа крови', sel(['', 'O(I) Rh+', 'O(I) Rh-', 'A(II) Rh+', 'A(II) Rh-', 'B(III) Rh+', 'B(III) Rh-', 'AB(IV) Rh+', 'AB(IV) Rh-'])),
-      mk('allergies', 'Аллергии', h('textarea', { class: 'inp', rows: 2 })), mk('chronic', 'Хронические заболевания', h('textarea', { class: 'inp', rows: 2 })),
-      mk('meds', 'Принимаемые препараты', h('textarea', { class: 'inp', rows: 2 })), mk('complaints', 'Жалобы', h('textarea', { class: 'inp', rows: 3 })),
-      h('h3', { text: 'Местонахождение пациента' }),
-      Ui.field('Адрес (обязательно)', this.loc.address), Ui.field('Телефон (обязательно)', this.loc.phone),
-      h('div', { class: 'banner warn', style: 'border-radius:var(--r1)', text: 'Экстренные службы: 103 / 112' }),
-      h('h3', { text: 'Приватные заметки' }), this.notes,
-      h('p', { class: 'note', style: 'margin:0', text: 'Заметки и карточка пациенту не передаются.' }), hist);
+      h('div', { class: 'rowb' }, h('h3', { text: T('Пациент') }), h('span', { class: 'chip', text: T('со слов пациента') })),
+      mk('full_name', T('ФИО'), Ui.input('text')), mk('birth', T('Дата рождения'), Ui.input('date')),
+      mk('sex', T('Пол'), sel(['', T('Женский'), T('Мужской')])), mk('blood', T('Группа крови'), sel(['', 'O(I) Rh+', 'O(I) Rh-', 'A(II) Rh+', 'A(II) Rh-', 'B(III) Rh+', 'B(III) Rh-', 'AB(IV) Rh+', 'AB(IV) Rh-'])),
+      mk('allergies', T('Аллергии'), h('textarea', { class: 'inp', rows: 2 })), mk('chronic', T('Хронические заболевания'), h('textarea', { class: 'inp', rows: 2 })),
+      mk('meds', T('Принимаемые препараты'), h('textarea', { class: 'inp', rows: 2 })), mk('complaints', T('Жалобы'), h('textarea', { class: 'inp', rows: 3 })),
+      h('h3', { text: T('Местонахождение пациента') }),
+      Ui.field(T('Адрес (обязательно)'), this.loc.address), Ui.field(T('Телефон (обязательно)'), this.loc.phone),
+      h('div', { class: 'banner warn', style: 'border-radius:var(--r1)', text: T('Экстренные службы: 103 / 112') }),
+      h('h3', { text: T('Приватные заметки') }), this.notes,
+      h('p', { class: 'note', style: 'margin:0', text: T('Заметки и карточка пациенту не передаются.') }), hist);
   },
   load(p) {
     const c = p.card || {};
@@ -457,31 +458,31 @@ const Record = {
   async saveCard() { try { await Api.ev('ehr', { card: this.collectCard() }); } catch (e) { Toast.err(e); } },
   conclPane() {
     const mk = (k, label, el) => { this.c[k] = el; return Ui.field(label, el); };
-    const icd = Ui.input('text', 'Например J06.9'); icd.setAttribute('list', 'icdlist'); icd.maxLength = 6; icd.style.textTransform = 'uppercase';
+    const icd = Ui.input('text', T('Например J06.9')); icd.setAttribute('list', 'icdlist'); icd.maxLength = 6; icd.style.textTransform = 'uppercase';
     const dl = h('datalist', { id: 'icdlist' }, ICD.map(([c, n]) => h('option', { value: c, label: n })));
     const hintEl = h('div', { class: 'note', 'aria-live': 'polite', text: '' });
     icd.addEventListener('input', () => {
       const v = icd.value.toUpperCase().trim(); const f = ICD.find(x => x[0] === v);
-      hintEl.textContent = !v ? '' : f ? f[1] : (ICD_RE.test(v) ? 'Код корректного формата' : 'Формат кода: A00 или A00.0');
+      hintEl.textContent = !v ? '' : f ? f[1] : (ICD_RE.test(v) ? T('Код корректного формата') : T('Формат кода: A00 или A00.0'));
       icd.setAttribute('aria-invalid', String(!!v && !ICD_RE.test(v)));
     });
     this.c.icd = icd;
-    return h('div', { class: 'stack' }, h('h3', { text: 'Заключение консультации' }),
-      mk('complaints', 'Жалобы', h('textarea', { class: 'inp', rows: 3 })), mk('anamnesis', 'Анамнез', h('textarea', { class: 'inp', rows: 3 })),
-      mk('diagnosis', 'Диагноз', h('textarea', { class: 'inp', rows: 2 })), Ui.field('Код МКБ-10', icd), dl, hintEl,
-      mk('recommendations', 'Рекомендации', h('textarea', { class: 'inp', rows: 4 })), mk('followup', 'Дата повторного контакта', Ui.input('date')),
-      h('div', { class: 'row wrap' }, h('button', { class: 'btn pri', onclick: () => this.saveConcl() }, 'Сохранить'),
-        h('button', { class: 'btn sec', onclick: () => this.printConcl() }, icon('doc'), 'Печать'),
-        h('button', { class: 'btn sec', onclick: () => this.sendConcl() }, icon('send'), 'Отправить пациенту'),
-        h('button', { class: 'btn sec', onclick: () => this.exportJson() }, icon('download'), 'JSON для МИС')),
-      h('p', { class: 'note', style: 'margin:0', text: 'Это заключение консультации, а не электронный рецепт.' }));
+    return h('div', { class: 'stack' }, h('h3', { text: T('Заключение консультации') }),
+      mk('complaints', T('Жалобы'), h('textarea', { class: 'inp', rows: 3 })), mk('anamnesis', T('Анамнез'), h('textarea', { class: 'inp', rows: 3 })),
+      mk('diagnosis', T('Диагноз'), h('textarea', { class: 'inp', rows: 2 })), Ui.field(T('Код МКБ-10'), icd), dl, hintEl,
+      mk('recommendations', T('Рекомендации'), h('textarea', { class: 'inp', rows: 4 })), mk('followup', T('Дата повторного контакта'), Ui.input('date')),
+      h('div', { class: 'row wrap' }, h('button', { class: 'btn pri', onclick: () => this.saveConcl() }, T('Сохранить')),
+        h('button', { class: 'btn sec', onclick: () => this.printConcl() }, icon('doc'), T('Печать')),
+        h('button', { class: 'btn sec', onclick: () => this.sendConcl() }, icon('send'), T('Отправить пациенту')),
+        h('button', { class: 'btn sec', onclick: () => this.exportJson() }, icon('download'), T('JSON для МИС'))),
+      h('p', { class: 'note', style: 'margin:0', text: T('Это заключение консультации, а не электронный рецепт.') }));
   },
   fillConcl(c) { for (const k of ['complaints', 'anamnesis', 'diagnosis', 'icd', 'recommendations', 'followup']) if (this.c[k]) this.c[k].value = c[k] || ''; },
   collectConcl() { const o = {}; for (const k of ['complaints', 'anamnesis', 'diagnosis', 'icd', 'recommendations', 'followup']) o[k] = (this.c[k].value || '').trim(); o.icd = o.icd.toUpperCase(); return o; },
   async saveConcl() {
     const c = this.collectConcl();
-    if (c.icd && !ICD_RE.test(c.icd)) { Toast.err('Код МКБ-10 должен иметь вид A00 или A00.0'); this.c.icd.focus(); return false; }
-    try { await Api.post('/rooms/' + Api.room + '/protocol', { conclusion: c }); this.lastConcl = c; Toast.show('Заключение сохранено'); return true; }
+    if (c.icd && !ICD_RE.test(c.icd)) { Toast.err(T('Код МКБ-10 должен иметь вид A00 или A00.0')); this.c.icd.focus(); return false; }
+    try { await Api.post('/rooms/' + Api.room + '/protocol', { conclusion: c }); this.lastConcl = c; Toast.show(T('Заключение сохранено')); return true; }
     catch (e) { Toast.err(e); return false; }
   },
   payload() {
@@ -491,7 +492,7 @@ const Record = {
   printConcl() { Print.conclusion(this.payload()); },
   async sendConcl() {
     if (!(await this.saveConcl())) return;
-    try { await Api.ev('document', {}); Toast.show('Заключение отправлено пациенту'); } catch (e) { Toast.err(e); }
+    try { await Api.ev('document', {}); Toast.show(T('Заключение отправлено пациенту')); } catch (e) { Toast.err(e); }
   },
   exportJson() {
     const p = this.payload(); const a = App.proto.appointment || {};
@@ -504,7 +505,7 @@ const App = {
   proto: {}, dead: false, banner: null,
   shell() {
     Header.el = h('header', { class: 'top' });
-    this.banner = h('div', { class: 'banner bad hidden', role: 'alert', text: 'Нет связи с сервером. Пробую восстановить подключение.' });
+    this.banner = h('div', { class: 'banner bad hidden', role: 'alert', text: T('Нет связи с сервером. Пробую восстановить подключение.') });
     $('#app').replaceChildren(Header.el, this.banner, h('main', { id: 'main' }));
     Header.update(); Services.start();
   },
@@ -514,7 +515,7 @@ const App = {
     window.addEventListener('online', () => this.setOffline(false));
     window.addEventListener('offline', () => this.setOffline(true));
     window.addEventListener('pagehide', () => { if (State.v.view === 'call' && !this.dead) Api.bye(); });
-    window.addEventListener('unhandledrejection', e => { e.preventDefault(); console.error(e.reason); if (e.reason && e.reason.name !== 'AbortError') Toast.err(e.reason instanceof ApiErr ? e.reason.message : 'Не удалось выполнить действие'); });
+    window.addEventListener('unhandledrejection', e => { e.preventDefault(); console.error(e.reason); if (e.reason && e.reason.name !== 'AbortError') Toast.err(e.reason instanceof ApiErr ? e.reason.message : T('Не удалось выполнить действие')); });
     document.addEventListener('keydown', e => this.key(e));
     try {
       const hl = await Api.get('/health', { token: false });
@@ -525,7 +526,7 @@ const App = {
       if (code) { Session.start(code); return; }
       if (doc) this.afterLogin(); else Auth.showLogin();
     } catch (e) {
-      $('#main').replaceChildren(h('div', { class: 'center-col' }, h('h2', { text: 'Сервер недоступен' }), h('p', { class: 'mut', text: e.message }), h('button', { class: 'btn pri', onclick: () => location.reload() }, 'Повторить')));
+      $('#main').replaceChildren(h('div', { class: 'center-col' }, h('h2', { text: T('Сервер недоступен') }), h('p', { class: 'mut', text: e.message }), h('button', { class: 'btn pri', onclick: () => location.reload() }, T('Повторить'))));
     }
   },
   afterLogin() {
@@ -556,7 +557,7 @@ const App = {
     Header.update();
   },
   async emergency() {
-    if (!(await Ui.confirm('Экстренное завершение', 'Консультация будет немедленно прервана у обоих участников, комната закроется. Продолжить?', 'Завершить немедленно', true))) return;
+    if (!(await Ui.confirm(T('Экстренное завершение'), T('Консультация будет немедленно прервана у обоих участников, комната закроется. Продолжить?'), T('Завершить немедленно'), true))) return;
     try { await Api.ev('kill', {}); } catch (e) { if (!(e instanceof ApiErr && e.status === 410)) { Toast.err(e); return; } }
     this.killed();
   },
@@ -570,25 +571,25 @@ const App = {
     $('#printArea').replaceChildren();
     State.set({ view: 'killed', rtc: 'closed', status: 'completed', peerHere: false });
     Header.update();
-    $('#main').replaceChildren(h('div', { class: 'center-col' }, h('h1', { text: 'Консультация прервана' }),
-      h('p', { class: 'mut', text: doc ? 'Комната закрыта у обоих участников. Данные на экране очищены.' : 'Врач завершил сеанс. Данные на экране очищены.' }),
-      doc ? h('button', { class: 'btn pri lg', onclick: () => { this.dead = false; history.replaceState(null, '', location.pathname); Appointments.show(); } }, 'К списку приёмов') : null));
+    $('#main').replaceChildren(h('div', { class: 'center-col' }, h('h1', { text: T('Консультация прервана') }),
+      h('p', { class: 'mut', text: doc ? T('Комната закрыта у обоих участников. Данные на экране очищены.') : T('Врач завершил сеанс. Данные на экране очищены.') }),
+      doc ? h('button', { class: 'btn pri lg', onclick: () => { this.dead = false; history.replaceState(null, '', location.pathname); Appointments.show(); } }, T('К списку приёмов')) : null));
   },
   roomGone(e) {
     if (this.dead) return;
     if (e && e.status === 410) { this.killed(); return; }
     Poller.stop(); clearInterval(Session.hb); Speech.stop(); Rtc.close(); Quality.stop(); FaceMesh.stopAll(); Media.stop();
-    $('#main').replaceChildren(h('div', { class: 'center-col' }, h('h2', { text: 'Сеанс недоступен' }),
-      h('p', { class: 'mut', text: 'Комната не найдена или доступ к ней потерян (возможно, сервер перезапущен).' }),
-      h('button', { class: 'btn pri', onclick: () => { try { sessionStorage.removeItem('mars_pt_' + Session.code); } catch (x) { /* ignore */ } location.reload(); } }, 'Начать заново')));
+    $('#main').replaceChildren(h('div', { class: 'center-col' }, h('h2', { text: T('Сеанс недоступен') }),
+      h('p', { class: 'mut', text: T('Комната не найдена или доступ к ней потерян (возможно, сервер перезапущен).') }),
+      h('button', { class: 'btn pri', onclick: () => { try { sessionStorage.removeItem('mars_pt_' + Session.code); } catch (x) { /* ignore */ } location.reload(); } }, T('Начать заново'))));
   },
   async auditSheet() {
-    const s = Ui.sheet({ title: 'Журнал аудита', wide: true });
+    const s = Ui.sheet({ title: T('Журнал аудита'), wide: true });
     s.el.append(h('div', { class: 'sk', style: 'height:80px' }));
     try {
       const r = await Api.get('/audit?limit=300');
       s.el.replaceChildren(h('div', { style: 'overflow:auto;max-height:60dvh' }, h('table', { class: 'tb' },
-        h('tr', null, ['Время', 'Участник', 'Действие', 'Комната', 'Деталь'].map(t => h('th', { text: t }))),
+        h('tr', null, [T('Время'), T('Участник'), T('Действие'), T('Комната'), T('Деталь')].map(t => h('th', { text: t }))),
         r.items.map(i => h('tr', null, h('td', { text: fmtDT(i.ts) }), h('td', { text: i.actor }), h('td', { text: i.action }), h('td', { class: 'mono', text: i.room }), h('td', { text: i.detail }))))));
     } catch (e) { s.el.replaceChildren(h('p', { text: e.message })); }
   }

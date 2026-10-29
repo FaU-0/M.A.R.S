@@ -25,7 +25,7 @@ const c1 = fs.readFileSync(path.join(src, 'c_js1.js'), 'utf8');
 const helpers = ['const clamp', 'const median'].map(k => c1.split('\n').find(l => l.startsWith(k))).join('\n');
 const ctx = { console, performance, Math, JSON, Object, Array, Date, Promise, Set, Map, setTimeout, clearTimeout, setInterval, clearInterval };
 vm.createContext(ctx);
-vm.runInContext(helpers + '\n' + fs.readFileSync(path.join(src, 'd_face1.js'), 'utf8') + '\n' + fs.readFileSync(path.join(src, 'd_face3.js'), 'utf8') + '\nthis.FaceMesh = FaceMesh;', ctx);
+vm.runInContext('const T = s => s, LANG = "ru", DEC = ",";\n' + helpers + '\n' + fs.readFileSync(path.join(src, 'd_face1.js'), 'utf8') + '\n' + fs.readFileSync(path.join(src, 'd_face3.js'), 'utf8') + '\nthis.FaceMesh = FaceMesh;', ctx);
 const inp = JSON.parse(fs.readFileSync(0, 'utf8'));
 process.stdout.write(JSON.stringify(inp.map(rep => ctx.FaceMesh.Fhir.bundle(rep))));
 """

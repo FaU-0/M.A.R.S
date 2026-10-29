@@ -45,12 +45,12 @@ FaceMesh.Remote = {
       job = await Api.get('/rooms/' + Api.room + '/jobs/' + job.id, { signal }).catch(e => { if (e && e.name === 'AbortError') throw e; return job; });
     }
     if (job.status === 'done') return Object.assign({}, job.result, { job_id: job.id });  /* по номеру задания сервер сохранит числа vision, а не браузера */
-    throw new Error((job.error && job.error.message) || 'Ошибка анализа');
+    throw new Error((job.error && job.error.message) || T('Ошибка анализа'));
   },
   async pick(kind, input, local, signal, downMsg) {
     const r = await this.run(kind, input, signal);
     if (r) { this.down = false; r.source = 'vision'; return r; }
-    if (!this.down) Toast.show(downMsg || 'Сервис анализа временно недоступен: расчёт выполнен на этом устройстве');
+    if (!this.down) Toast.show(downMsg || T('Сервис анализа временно недоступен: расчёт выполнен на этом устройстве'));
     this.down = true; local.source = 'device';
     return local;
   }
@@ -61,7 +61,7 @@ FaceMesh.Loader = {
   mod: null, fileset: null, conn: null,
   async load() {
     if (this.mod) return this.mod;
-    if (!Cfg.mediapipe) throw new Error('Файлы MediaPipe не найдены на сервере');
+    if (!Cfg.mediapipe) throw new Error(T('Файлы MediaPipe не найдены на сервере'));
     this.mod = await import('/vendor/vision_bundle.mjs');
     this.fileset = await this.mod.FilesetResolver.forVisionTasks('/vendor/wasm');
     this.conn = this.mod.FaceLandmarker.FACE_LANDMARKS_TESSELATION || null;
@@ -74,7 +74,7 @@ FaceMesh.Loader = {
       runningMode: running || 'VIDEO', numFaces: FACE_MAX, outputFaceBlendshapes: true, outputFacialTransformationMatrixes: true
     });
     try { return await mk('GPU'); }
-    catch (e) { console.warn('GPU недоступен, использую CPU', e); return await mk('CPU'); }
+    catch (e) { console.warn(T('GPU недоступен, использую CPU'), e); return await mk('CPU'); }
   }
 };
 
@@ -116,7 +116,7 @@ class FMTracker {
       this.errors = 0;
     } catch (e) {
       console.error('Face Mesh', e);
-      if (++this.errors > 5) { this.stop(); FaceMesh.fail('Модуль Face Mesh остановлен из-за ошибки обработки видео'); return; }
+      if (++this.errors > 5) { this.stop(); FaceMesh.fail(T('Модуль Face Mesh остановлен из-за ошибки обработки видео')); return; }
     }
     this.kick();
   }
@@ -190,17 +190,17 @@ FaceMesh.Pose = {
     if (!e) return null;
     const aMax = Math.max(Math.abs(e.yaw), Math.abs(e.pitch), Math.abs(e.roll));
     let hint = '', level = 'good';
-    if (aMax > tol * 2.5) { hint = 'Повернитесь к камере'; level = 'bad'; }
-    else if (g.size < 0.2) { hint = 'Подвиньтесь ближе'; level = 'bad'; }
-    else if (g.size < 0.3) { hint = 'Подвиньтесь ближе'; level = 'medium'; }
-    else if (g.size > 0.8) { hint = 'Отодвиньтесь от камеры'; level = 'medium'; }
-    else if (Math.abs(g.cx - 0.5) > 0.18 || Math.abs(g.cy - 0.5) > 0.18) { hint = 'Расположитесь по центру кадра'; level = 'medium'; }
-    else if (st && st.mean < 70) { hint = 'Добавьте света спереди'; level = 'medium'; }
-    else if (st && st.bg - st.mean > 45) { hint = 'Уберите свет за спиной'; level = 'medium'; }
-    else if (st && st.over > 0.08) { hint = 'Слишком яркий свет на лице'; level = 'medium'; }
-    else if (this.moving()) { hint = 'Держите голову неподвижно'; level = 'medium'; }
-    else if (st && st.sharp < 12) { hint = 'Изображение размыто, держите голову неподвижно'; level = 'medium'; }
-    else if (aMax > tol) { hint = 'Выровняйте голову'; level = 'medium'; }
+    if (aMax > tol * 2.5) { hint = T('Повернитесь к камере'); level = 'bad'; }
+    else if (g.size < 0.2) { hint = T('Подвиньтесь ближе'); level = 'bad'; }
+    else if (g.size < 0.3) { hint = T('Подвиньтесь ближе'); level = 'medium'; }
+    else if (g.size > 0.8) { hint = T('Отодвиньтесь от камеры'); level = 'medium'; }
+    else if (Math.abs(g.cx - 0.5) > 0.18 || Math.abs(g.cy - 0.5) > 0.18) { hint = T('Расположитесь по центру кадра'); level = 'medium'; }
+    else if (st && st.mean < 70) { hint = T('Добавьте света спереди'); level = 'medium'; }
+    else if (st && st.bg - st.mean > 45) { hint = T('Уберите свет за спиной'); level = 'medium'; }
+    else if (st && st.over > 0.08) { hint = T('Слишком яркий свет на лице'); level = 'medium'; }
+    else if (this.moving()) { hint = T('Держите голову неподвижно'); level = 'medium'; }
+    else if (st && st.sharp < 12) { hint = T('Изображение размыто, держите голову неподвижно'); level = 'medium'; }
+    else if (aMax > tol) { hint = T('Выровняйте голову'); level = 'medium'; }
     return Object.assign({ level, hint, tol, size: g.size, cx: g.cx, cy: g.cy, t: performance.now() }, e, st ? { mean: st.mean, over: st.over, sharp: st.sharp, bg: st.bg } : {});
   },
   inTol(e, tol) { return !!e && Math.abs(e.yaw) <= tol && Math.abs(e.pitch) <= tol && Math.abs(e.roll) <= tol; },
@@ -300,8 +300,8 @@ FaceMesh.Symmetry = {
     v.cR = -down(P[61]); v.cL = -down(P[291]); v.wR = -along(P[234]); v.wL = along(P[454]);
     return v;
   },
-  PAIRS: [['eo', 'Внешние уголки глаз: расстояние до средней линии', 'eoR', 'eoL'], ['ei', 'Внутренние уголки глаз: расстояние до средней линии', 'eiR', 'eiL'], ['mouth', 'Уголки рта: расстояние до средней линии', 'mR', 'mL'],
-    ['brow', 'Высота бровей над линией глаз', 'bR', 'bL'], ['mcor', 'Высота уголков рта относительно линии глаз', 'cR', 'cL'], ['half', 'Ширина половин лица', 'wR', 'wL']],
+  PAIRS: [['eo', T('Внешние уголки глаз: расстояние до средней линии'), 'eoR', 'eoL'], ['ei', T('Внутренние уголки глаз: расстояние до средней линии'), 'eiR', 'eiL'], ['mouth', T('Уголки рта: расстояние до средней линии'), 'mR', 'mL'],
+    ['brow', T('Высота бровей над линией глаз'), 'bR', 'bL'], ['mcor', T('Высота уголков рта относительно линии глаз'), 'cR', 'cL'], ['half', T('Ширина половин лица'), 'wR', 'wL']],
   build(samples, cal) {
     const med = k => median(samples.map(s => s[k])), ipdPx = med('ipd');
     const k = cal && cal.ipd_mm ? cal.ipd_mm : null;
@@ -310,7 +310,7 @@ FaceMesh.Symmetry = {
       if (k) { o.right_mm = r * k; o.left_mm = l * k; o.diff_mm = (r - l) * k; }
       return o;
     });
-    const singles = [{ id: 'tilt', label: 'Наклон линии глаз', value: med('tilt'), unit: 'deg' }, { id: 'nose', label: 'Смещение кончика носа от средней линии', value: med('nose'), unit: 'ipd' }, { id: 'chin', label: 'Смещение подбородка от средней линии', value: med('chin'), unit: 'ipd' }];
+    const singles = [{ id: 'tilt', label: T('Наклон линии глаз'), value: med('tilt'), unit: 'deg' }, { id: 'nose', label: T('Смещение кончика носа от средней линии'), value: med('nose'), unit: 'ipd' }, { id: 'chin', label: T('Смещение подбородка от средней линии'), value: med('chin'), unit: 'ipd' }];
     if (k) for (const s of singles) if (s.unit === 'ipd') s.value_mm = s.value * k;
     const out = { kind: 'symmetry', pose_ok: true, samples: samples.length, ipd_px: ipdPx, tolerance: FaceMesh.tol, rows, singles, ts: Math.floor(Date.now() / 1000) };
     if (k) out.calibration = cal;
@@ -320,18 +320,18 @@ FaceMesh.Symmetry = {
   run(onProgress, signal) {
     const F = FaceMesh, trk = F.trk, secs = 2.5, need = 12;
     return new Promise((res, rej) => {
-      if (!trk) return rej(new Error('Модуль не запущен'));
+      if (!trk) return rej(new Error(T('Модуль не запущен')));
       const S = [], FR = []; let t0 = 0, fail = null; const t00 = performance.now();
       const fn = cur => {
-        if (signal && signal.aborted) { done(new Error('Отменено')); return; }
+        if (signal && signal.aborted) { done(new Error(T('Отменено'))); return; }
         const e = F.Pose.euler(cur);
-        if (!F.Pose.inTol(e, F.tol) || cur.multi && false) { t0 = 0; S.length = 0; FR.length = 0; onProgress(0, 'Выровняйте голову: ' + (e ? 'yaw ' + e.yaw.toFixed(0) + ', pitch ' + e.pitch.toFixed(0) + ', roll ' + e.roll.toFixed(0) : '')); return; }
+        if (!F.Pose.inTol(e, F.tol) || cur.multi && false) { t0 = 0; S.length = 0; FR.length = 0; onProgress(0, T('Выровняйте голову: ') + (e ? 'yaw ' + e.yaw.toFixed(0) + ', pitch ' + e.pitch.toFixed(0) + ', roll ' + e.roll.toFixed(0) : '')); return; }
         if (!t0) t0 = performance.now();
         const v = this.one(cur); if (v) { S.push(v); FR.push(F.Remote.pack(cur, this.IDX, [])); }
-        const p = Math.min(1, (performance.now() - t0) / (secs * 1000)); onProgress(p, 'Держите позу');
+        const p = Math.min(1, (performance.now() - t0) / (secs * 1000)); onProgress(p, T('Держите позу'));
         if (p >= 1) { if (S.length >= need) done(null); else { t0 = 0; S.length = 0; FR.length = 0; } }
       };
-      const tm = setInterval(() => { if (performance.now() - t00 > 25000) done(new Error('Не удалось получить устойчивую позу в допуске за отведённое время')); else if (trk.lost()) { t0 = 0; S.length = 0; FR.length = 0; onProgress(0, 'Лицо не найдено'); } }, 400);
+      const tm = setInterval(() => { if (performance.now() - t00 > 25000) done(new Error(T('Не удалось получить устойчивую позу в допуске за отведённое время'))); else if (trk.lost()) { t0 = 0; S.length = 0; FR.length = 0; onProgress(0, T('Лицо не найдено')); } }, 400);
       /* кадры для сервиса vision: неперечисляемое поле, в протокол не попадает */
       const done = err => { clearInterval(tm); F.subs.delete(fn); if (err) return rej(err); const out = this.build(S, F.cal); Object.defineProperty(out, '_frames', { value: FR }); res(out); };
       F.subs.add(fn);
@@ -342,25 +342,25 @@ FaceMesh.Symmetry = {
 /* --- Mobility: подвижность по blendshapes --- */
 FaceMesh.Mobility = {
   TASKS: [
-    { id: 'smile', label: 'Улыбка', cmd: 'Широко улыбнитесь и держите улыбку', r: 'mouthSmileRight', l: 'mouthSmileLeft' },
-    { id: 'brow', label: 'Подъём бровей', cmd: 'Поднимите брови как можно выше', r: 'browOuterUpRight', l: 'browOuterUpLeft' },
-    { id: 'eye', label: 'Закрытие глаз', cmd: 'Крепко зажмурьте глаза', r: 'eyeBlinkRight', l: 'eyeBlinkLeft' },
-    { id: 'cheek', label: 'Надувание щёк', cmd: 'Надуйте щёки и держите', single: 'cheekPuff' },
-    { id: 'mouth', label: 'Открытие рта', cmd: 'Широко откройте рот', single: 'jawOpen' },
-    { id: 'lips', label: 'Поджатие губ', cmd: 'Плотно сожмите губы', r: 'mouthPressRight', l: 'mouthPressLeft' }
+    { id: 'smile', label: T('Улыбка'), cmd: T('Широко улыбнитесь и держите улыбку'), r: 'mouthSmileRight', l: 'mouthSmileLeft' },
+    { id: 'brow', label: T('Подъём бровей'), cmd: T('Поднимите брови как можно выше'), r: 'browOuterUpRight', l: 'browOuterUpLeft' },
+    { id: 'eye', label: T('Закрытие глаз'), cmd: T('Крепко зажмурьте глаза'), r: 'eyeBlinkRight', l: 'eyeBlinkLeft' },
+    { id: 'cheek', label: T('Надувание щёк'), cmd: T('Надуйте щёки и держите'), single: 'cheekPuff' },
+    { id: 'mouth', label: T('Открытие рта'), cmd: T('Широко откройте рот'), single: 'jawOpen' },
+    { id: 'lips', label: T('Поджатие губ'), cmd: T('Плотно сожмите губы'), r: 'mouthPressRight', l: 'mouthPressLeft' }
   ],
   val(cur, name) { if (!cur.bs) return 0; const c = cur.bs.find(x => x.categoryName === name); return c ? c.score : 0; },
   /* одно задание: максимум коэффициента за 4 с в кадрах с допустимой позой */
   runTask(task, onProgress, signal) {
     const F = FaceMesh, secs = 4, tol = Math.max(F.tol * 2, 10);
     return new Promise((res, rej) => {
-      if (!F.trk) return rej(new Error('Модуль не запущен'));
+      if (!F.trk) return rej(new Error(T('Модуль не запущен')));
       const t0 = performance.now(), FR = [], names = task.single ? [task.single] : [task.r, task.l]; let mr = 0, ml = 0, ms = 0, n = 0;
       const fn = cur => {
-        if (signal && signal.aborted) { fin(new Error('Отменено')); return; }
+        if (signal && signal.aborted) { fin(new Error(T('Отменено'))); return; }
         if (FR.length < 400) FR.push(F.Remote.pack(cur, [LM.REO, LM.LEO, LM.NOSE], names));
         const e = F.Pose.euler(cur);
-        if (!F.Pose.inTol(e, tol)) { onProgress((performance.now() - t0) / (secs * 1000), 'Смотрите в камеру'); return; }
+        if (!F.Pose.inTol(e, tol)) { onProgress((performance.now() - t0) / (secs * 1000), T('Смотрите в камеру')); return; }
         n++;
         if (task.single) ms = Math.max(ms, this.val(cur, task.single)); else { mr = Math.max(mr, this.val(cur, task.r)); ml = Math.max(ml, this.val(cur, task.l)); }
         onProgress((performance.now() - t0) / (secs * 1000), task.cmd);
@@ -369,7 +369,7 @@ FaceMesh.Mobility = {
       const fin = err => {
         clearInterval(tm); F.subs.delete(fn);
         if (err) return rej(err);
-        if (n < 10) return rej(new Error('Недостаточно кадров с лицом в допустимой позе. Повторите задание.'));
+        if (n < 10) return rej(new Error(T('Недостаточно кадров с лицом в допустимой позе. Повторите задание.')));
         const o = { id: task.id, label: task.label };
         if (task.single) o.single = ms; else { o.right = mr; o.left = ml; o.ratio = Math.max(mr, ml) > 0.05 ? Math.min(mr, ml) / Math.max(mr, ml) : null; }
         Object.defineProperty(o, '_frames', { value: FR });
@@ -392,7 +392,7 @@ FaceMesh.Calibrate = {
     const iris = median(samples.map(s => s.iris)), ipd = median(samples.map(s => s.ipd));
     if (!iris || !ipd) return null;
     const mmpp = this.IRIS_MM / iris;
-    return { source: 'iris', label: 'по радужке (приблизительно, погрешность выше)', approx: true, mm_per_px: mmpp, ipd_mm: ipd * mmpp, ts: Math.floor(Date.now() / 1000) };
+    return { source: 'iris', label: T('по радужке (приблизительно, погрешность выше)'), approx: true, mm_per_px: mmpp, ipd_mm: ipd * mmpp, ts: Math.floor(Date.now() / 1000) };
   },
   /* pts: 4 угла карты по порядку: левый верх, правый верх, правый низ, левый низ (в пикселях кадра) */
   fromCard(pts, ipdPx) {
@@ -400,6 +400,6 @@ FaceMesh.Calibrate = {
     const w = (dist(pts[0], pts[1]) + dist(pts[3], pts[2])) / 2, hh = (dist(pts[0], pts[3]) + dist(pts[1], pts[2])) / 2;
     if (w < 20 || hh < 12) return null;
     const mw = this.CARD_W / w, mh = this.CARD_H / hh, mmpp = (mw + mh) / 2, dev = Math.abs(mw - mh) / mmpp;
-    return { source: 'card', label: 'по банковской карте 85,6 мм', approx: false, mm_per_px: mmpp, ipd_mm: ipdPx * mmpp, skew: dev, ts: Math.floor(Date.now() / 1000) };
+    return { source: 'card', label: T('по банковской карте 85,6 мм'), approx: false, mm_per_px: mmpp, ipd_mm: ipdPx * mmpp, skew: dev, ts: Math.floor(Date.now() / 1000) };
   }
 };
