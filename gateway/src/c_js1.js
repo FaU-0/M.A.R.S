@@ -181,7 +181,18 @@ const Ui = {
     const a = h('a', { href: URL.createObjectURL(new Blob([text], { type: mime || 'application/json' })), download: name });
     document.body.append(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 500);
   },
-  big() { const on = !document.documentElement.classList.contains('big'); document.documentElement.classList.toggle('big', on); try { localStorage.setItem('mars_big', on ? '1' : '0'); } catch (e) { /* без хранилища */ } },
+  /* «Крупно и контрастно» для слабовидящих: крупнее текст и элементы управления (big), темнее текст и рамки (hc).
+     Выбор запоминается на этом устройстве */
+  big() { const on = !this.isBig(); document.documentElement.classList.toggle('big', on); document.documentElement.classList.toggle('hc', on); try { localStorage.setItem('mars_big', on ? '1' : '0'); } catch (e) { /* без хранилища */ } },
+  isBig() { return document.documentElement.classList.contains('big'); },
+  /* заметная кнопка режима на первом экране пациента: до согласия и проверки камеры */
+  bigToggle() {
+    const b = h('button', { class: 'btn sec bigtoggle', 'aria-pressed': String(this.isBig()) }, icon('text'), h('span'));
+    const paint = () => { b.setAttribute('aria-pressed', String(this.isBig())); b.lastChild.textContent = this.isBig() ? 'Обычный вид' : 'Крупно и контрастно'; };
+    b.onclick = () => { this.big(); paint(); Header.update(); };
+    paint();
+    return b;
+  },
   sound() {
     try {
       const AC = window.AudioContext || window.webkitAudioContext; if (!AC) return;

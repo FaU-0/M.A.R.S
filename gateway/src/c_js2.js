@@ -356,7 +356,7 @@ const Session = {
     const inp = Ui.input('text', 'Код из приглашения'); inp.maxLength = 8; inp.className += ' mono'; inp.style.cssText = 'text-align:center;font-size:22px;text-transform:uppercase';
     const err = h('p', { class: 'sm', style: 'color:var(--badt);margin:0;min-height:20px', role: 'alert', text: msg || '' });
     const go = e => { e.preventDefault(); const c = inp.value.toUpperCase().replace(/[^A-Z0-9]/g, ''); if (c.length < 4) { err.textContent = 'Введите код из приглашения'; return; } this.start(c); };
-    $('#main').replaceChildren(h('div', { class: 'center-col' }, h('h1', { text: 'Консультация' }), h('p', { class: 'mut', text: Cfg.center }),
+    $('#main').replaceChildren(h('div', { class: 'center-col' }, Ui.bigToggle(), h('h1', { text: 'Консультация' }), h('p', { class: 'mut', text: Cfg.center }),
       h('form', { class: 'stack', style: 'width:min(340px,100%)', onsubmit: go }, Ui.field('Код консультации', inp), err, h('button', { class: 'btn pri lg', type: 'submit', text: 'Продолжить' })),
       Auth.doctor || Cfg.auth ? h('button', { class: 'btn txt', onclick: () => Auth.showLogin(), text: 'Вход для врача' }) : null));
     inp.focus();
@@ -376,6 +376,7 @@ const Session = {
     const btn = h('button', { class: 'btn pri lg', disabled: true, onclick: () => this.join(true) }, 'Продолжить');
     cb.addEventListener('change', () => { btn.disabled = !cb.checked; });
     $('#main').replaceChildren(h('div', { class: 'page' }, h('div', { class: 'stack' },
+      Ui.bigToggle(),
       h('h1', { text: info.center }),
       h('div', { class: 'list' },
         h('div', { class: 'li' }, icon('user'), h('div', { class: 'grow' }, h('div', { class: 'sm mut', text: 'Врач' }), h('div', { text: info.doctor || 'Врач центра' }))),

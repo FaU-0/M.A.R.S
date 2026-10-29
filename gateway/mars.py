@@ -2263,6 +2263,23 @@ canvas.ov{position:absolute;inset:0;width:100%;height:100%;pointer-events:none}
 .cb:active{transform:scale(.94)}
 .cb[aria-pressed=true]{background:#fff;color:#000}
 .cb.end{background:var(--bad);color:#fff}
+/* подписи под кнопками звонка */
+.callbar{padding-bottom:26px}
+.cb{position:relative}
+.cb::after{content:attr(data-short);position:absolute;top:calc(100% + 3px);left:50%;transform:translateX(-50%);font-size:11px;font-weight:600;line-height:1;color:#fff;white-space:nowrap;pointer-events:none}
+.only-wide{white-space:nowrap}
+/* телефон: в панели звонка 4 главные кнопки (чат и задания есть в нижней навигации), в шапке точка без подписи */
+@media (max-width:700px){.only-wide{display:none}.callbar .cb.wide-only{display:none}.callbar{gap:18px}}
+/* «Крупно и контрастно» (Ui.big): крупнее текст и элементы, темнее вторичный текст и рамки, основной синий 7:1 с белым */
+html.hc{--fg2:#3a3a3c;--sep:#8e8e93;--acc:#0050A8;--acct:#0050A8}
+html.hc .btn,html.hc .inp{min-height:52px}
+html.hc .cb{width:56px;height:56px}
+html.hc input[type=checkbox]{width:32px!important;height:32px!important}
+html.hc :focus-visible{outline-width:3px}
+html.hc .cb::after{font-size:13px}
+@media (prefers-color-scheme:dark){html.hc{--fg2:#d1d1d6;--acct:#8CC4FF}}
+.stack>.bigtoggle{align-self:flex-start}
+.bigtoggle[aria-pressed=true]{background:var(--acc);color:#fff}
 .vmsg{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;text-align:center;padding:24px;z-index:2;font-size:17px}
 .hint{position:absolute;left:12px;right:12px;bottom:84px;z-index:7;text-align:center;font-size:22px;font-weight:600;color:#fff;text-shadow:0 0 3px rgba(0,0,0,.8);pointer-events:none}
 .pqual{position:absolute;left:12px;top:56px;z-index:7;display:flex;align-items:center;gap:6px;font-size:13px;background:rgba(0,0,0,.45);padding:4px 10px;border-radius:12px;color:#fff}
@@ -2487,7 +2504,18 @@ const Ui = {
     const a = h('a', { href: URL.createObjectURL(new Blob([text], { type: mime || 'application/json' })), download: name });
     document.body.append(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 500);
   },
-  big() { const on = !document.documentElement.classList.contains('big'); document.documentElement.classList.toggle('big', on); try { localStorage.setItem('mars_big', on ? '1' : '0'); } catch (e) { /* без хранилища */ } },
+  /* «Крупно и контрастно» для слабовидящих: крупнее текст и элементы управления (big), темнее текст и рамки (hc).
+     Выбор запоминается на этом устройстве */
+  big() { const on = !this.isBig(); document.documentElement.classList.toggle('big', on); document.documentElement.classList.toggle('hc', on); try { localStorage.setItem('mars_big', on ? '1' : '0'); } catch (e) { /* без хранилища */ } },
+  isBig() { return document.documentElement.classList.contains('big'); },
+  /* заметная кнопка режима на первом экране пациента: до согласия и проверки камеры */
+  bigToggle() {
+    const b = h('button', { class: 'btn sec bigtoggle', 'aria-pressed': String(this.isBig()) }, icon('text'), h('span'));
+    const paint = () => { b.setAttribute('aria-pressed', String(this.isBig())); b.lastChild.textContent = this.isBig() ? 'Обычный вид' : 'Крупно и контрастно'; };
+    b.onclick = () => { this.big(); paint(); Header.update(); };
+    paint();
+    return b;
+  },
   sound() {
     try {
       const AC = window.AudioContext || window.webkitAudioContext; if (!AC) return;
@@ -2883,7 +2911,7 @@ const Session = {
     const inp = Ui.input('text', 'Код из приглашения'); inp.maxLength = 8; inp.className += ' mono'; inp.style.cssText = 'text-align:center;font-size:22px;text-transform:uppercase';
     const err = h('p', { class: 'sm', style: 'color:var(--badt);margin:0;min-height:20px', role: 'alert', text: msg || '' });
     const go = e => { e.preventDefault(); const c = inp.value.toUpperCase().replace(/[^A-Z0-9]/g, ''); if (c.length < 4) { err.textContent = 'Введите код из приглашения'; return; } this.start(c); };
-    $('#main').replaceChildren(h('div', { class: 'center-col' }, h('h1', { text: 'Консультация' }), h('p', { class: 'mut', text: Cfg.center }),
+    $('#main').replaceChildren(h('div', { class: 'center-col' }, Ui.bigToggle(), h('h1', { text: 'Консультация' }), h('p', { class: 'mut', text: Cfg.center }),
       h('form', { class: 'stack', style: 'width:min(340px,100%)', onsubmit: go }, Ui.field('Код консультации', inp), err, h('button', { class: 'btn pri lg', type: 'submit', text: 'Продолжить' })),
       Auth.doctor || Cfg.auth ? h('button', { class: 'btn txt', onclick: () => Auth.showLogin(), text: 'Вход для врача' }) : null));
     inp.focus();
@@ -2903,6 +2931,7 @@ const Session = {
     const btn = h('button', { class: 'btn pri lg', disabled: true, onclick: () => this.join(true) }, 'Продолжить');
     cb.addEventListener('change', () => { btn.disabled = !cb.checked; });
     $('#main').replaceChildren(h('div', { class: 'page' }, h('div', { class: 'stack' },
+      Ui.bigToggle(),
       h('h1', { text: info.center }),
       h('div', { class: 'list' },
         h('div', { class: 'li' }, icon('user'), h('div', { class: 'grow' }, h('div', { class: 'sm mut', text: 'Врач' }), h('div', { text: info.doctor || 'Врач центра' }))),
@@ -3031,6 +3060,8 @@ const Header = {
     kids.push(h('div', { class: 'net', role: 'status' }, h('span', { class: 'dot ' + (v.net ? 'ok' : 'bad') }), h('span', { class: 'only-wide', text: v.net ? 'В сети' : 'Нет связи' })));
     if (inRoom) kids.push(h('div', { class: 'codebox' }, h('span', { class: 'mut', text: 'Код' }), h('span', { class: 'mono', text: Api.room }),
       h('button', { class: 'ibtn', style: 'width:32px;height:32px', 'aria-label': 'Скопировать код сессии', title: 'Скопировать код', onclick: () => Ui.copy(Api.room, 'Код скопирован') }, icon('copy'))));
+    const big = Ui.isBig();
+    kids.push(h('button', { class: 'ibtn', 'aria-label': 'Крупно и контрастно', 'aria-pressed': String(big), title: big ? 'Обычный вид' : 'Крупно и контрастно', onclick: () => { Ui.big(); this.update(); } }, icon('text')));
     kids.push(h('button', { class: 'ibtn', 'aria-label': 'Меню', title: 'Меню', onclick: () => this.menu() }, icon('menu')));
     this.el.replaceChildren(...kids);
   },
@@ -3041,7 +3072,7 @@ const Header = {
     const list = h('div', { class: 'list' });
     if (doc || (Auth.doctor && v.view !== 'join')) list.append(item('calendar', 'Приёмы', () => App.toAppointments()));
     if (Auth.doctor && Auth.doctor.admin) list.append(item('list', 'Журнал аудита', () => App.auditSheet()));
-    list.append(item('text', 'Крупный шрифт', () => Ui.big()));
+    list.append(item('text', Ui.isBig() ? 'Обычный вид' : 'Крупно и контрастно', () => { Ui.big(); this.update(); }));
     if (inRoom && doc) {
       list.append(item('user', 'Освободить место пациента', async () => { try { await Api.ev('control', { action: 'reset_patient' }); Toast.show('Пациент сможет войти заново по ссылке'); } catch (e) { Toast.err(e); } }));
       list.append(item('alert', 'Экстренное завершение', () => App.emergency(), true));
@@ -3069,15 +3100,16 @@ const CallUi = {
     R.vmsg = h('div', { class: 'vmsg' });
     R.hint = h('div', { class: 'hint', role: 'status', 'aria-live': 'polite' });
     R.pq = h('div', { class: 'pqual hidden' });
-    const cb = (name, label, fn, pressed) => h('button', { class: 'cb', 'aria-label': label, title: label, 'aria-pressed': pressed ? 'true' : 'false', onclick: fn }, icon(name));
-    R.bMic = cb('mic', 'Микрофон (M)', () => this.toggleMic());
-    R.bCam = cb('video', 'Камера (V)', () => this.toggleCam());
-    R.bScr = cb('screen', 'Демонстрация экрана', async e => { if (Media.sharing) await Media.stopShare(); else await Media.shareScreen(); });
-    R.bMesh = cb('mesh', isDoc ? 'Face Mesh: сетка (F)' : 'Задания для лица', () => { if (isDoc) FaceMesh.toggle(); else FaceMesh.openTasks(); });
-    R.bMore = cb('more', 'Ещё', () => this.moreSheet());
-    R.bEnd = cb('end', isDoc ? 'Завершить приём' : 'Выйти', () => this.endClick()); R.bEnd.classList.add('end');
+    /* подпись под каждой кнопкой (data-short): иконка без слов непонятна; на телефоне класс wide-only прячет лишнее */
+    const cb = (name, label, fn, short, wideOnly) => h('button', { class: 'cb' + (wideOnly ? ' wide-only' : ''), 'aria-label': label, title: label, 'data-short': short, 'aria-pressed': 'false', onclick: fn }, icon(name));
+    R.bMic = cb('mic', 'Микрофон (M)', () => this.toggleMic(), 'Микрофон');
+    R.bCam = cb('video', 'Камера (V)', () => this.toggleCam(), 'Камера');
+    R.bScr = cb('screen', 'Демонстрация экрана', async e => { if (Media.sharing) await Media.stopShare(); else await Media.shareScreen(); }, 'Экран', true);
+    R.bMesh = cb('mesh', isDoc ? 'Сетка лица (F)' : 'Задания для лица', () => { if (isDoc) FaceMesh.toggle(); else FaceMesh.openTasks(); }, isDoc ? 'Сетка' : 'Задания', !isDoc);
+    R.bMore = cb('more', 'Ещё', () => this.moreSheet(), 'Ещё');
+    R.bEnd = cb('end', isDoc ? 'Завершить приём' : 'Выйти', () => this.endClick(), isDoc ? 'Завершить' : 'Выйти'); R.bEnd.classList.add('end');
     const bar = [R.bMic, R.bCam, R.bScr, R.bMesh];
-    if (!isDoc) { R.bSide = cb('chat', 'Чат и файлы', () => { R.layout.classList.toggle('noside'); R.bSide.setAttribute('aria-pressed', String(!R.layout.classList.contains('noside'))); if (window.matchMedia('(max-width:700px)').matches) this.showTab('chat'); }); bar.push(R.bSide); }
+    if (!isDoc) { R.bSide = cb('chat', 'Чат и файлы', () => { R.layout.classList.toggle('noside'); R.bSide.setAttribute('aria-pressed', String(!R.layout.classList.contains('noside'))); if (window.matchMedia('(max-width:700px)').matches) this.showTab('chat'); }, 'Чат', true); bar.push(R.bSide); }
     bar.push(R.bMore, R.bEnd);
     R.bar = h('div', { class: 'callbar', role: 'toolbar', 'aria-label': 'Управление звонком' }, bar);
     R.wrap = h('div', { class: 'callwrap' }, R.stage, R.self, R.vtop, R.vmsg, R.pq, R.hint, R.bar);
@@ -3164,8 +3196,9 @@ const CallUi = {
     } else if (isDoc) { title = v.peerHere ? 'Пациент ожидает' : 'Ожидаем пациента'; sub = v.peerHere ? 'Укажите адрес и телефон пациента и начните приём' : 'Пациент ещё не вошёл в комнату'; btn = true; }
     else { title = 'Врач скоро подключится'; sub = 'Оставайтесь на этой странице'; }
     R.vmsg.classList.toggle('hidden', !show);
-    if (show) R.vmsg.replaceChildren(h('h2', { text: title }), h('p', { style: 'margin:0;opacity:.8', text: sub }),
-      btn ? h('button', { class: 'btn pri lg', onclick: () => this.start() }, 'Начать приём') : null);
+    /* replaceChildren(null) выводит слово «null»: пустые элементы отбрасываются */
+    if (show) R.vmsg.replaceChildren(...[h('h2', { text: title }), h('p', { style: 'margin:0;opacity:.8', text: sub }),
+      btn ? h('button', { class: 'btn pri lg', onclick: () => this.start() }, 'Начать приём') : null].filter(Boolean));
     const q = v.quality, L = { good: ['ok', 'Связь: хорошая'], mid: ['mid', 'Связь: средняя'], bad: ['bad', 'Связь: плохая'] }[q ? q.level : ''];
     R.qdot.className = 'dot ' + (L ? L[0] : ''); R.qtxt.textContent = L ? L[1] : (v.rtc === 'reconnecting' ? 'Переподключение' : '');
   },
@@ -3206,7 +3239,7 @@ const CallUi = {
     s.el.append(mk('Камера', d.v, 'v'), mk('Микрофон', d.a, 'a'));
     const ao = h('button', { class: 'btn sec', onclick: () => { Media.setAudioOnly(Media.camOn); this.syncBtns(); ao.textContent = Media.camOn ? 'Включить режим «Только аудио»' : 'Выключить режим «Только аудио»'; } }, icon('audio'), Media.camOn ? 'Включить режим «Только аудио»' : 'Выключить режим «Только аудио»');
     const fs = h('button', { class: 'btn sec', onclick: () => { s.close(); this.fullscreen(); } }, icon('full'), 'Полный экран');
-    const big = h('button', { class: 'btn sec', onclick: () => Ui.big() }, icon('text'), 'Крупный шрифт');
+    const big = h('button', { class: 'btn sec', onclick: () => { Ui.big(); Header.update(); s.close(); } }, icon('text'), Ui.isBig() ? 'Обычный вид' : 'Крупно и контрастно');
     const sp = State.v.role === 'doctor' ? h('button', { class: 'btn sec', onclick: () => { s.close(); Speech.request(); } }, icon('audio'), Speech.on ? 'Остановить расшифровку речи' : 'Включить расшифровку речи') : null;
     s.el.append(h('div', { class: 'stack' }, ao, fs, big, sp));
   },
@@ -3514,7 +3547,7 @@ const App = {
     Header.update(); Services.start();
   },
   async init() {
-    try { if (localStorage.getItem('mars_big') === '1') document.documentElement.classList.add('big'); } catch (e) { /* ignore */ }
+    try { if (localStorage.getItem('mars_big') === '1') document.documentElement.classList.add('big', 'hc'); } catch (e) { /* ignore */ }
     this.shell();
     window.addEventListener('online', () => this.setOffline(false));
     window.addEventListener('offline', () => this.setOffline(true));
