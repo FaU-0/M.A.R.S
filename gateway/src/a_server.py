@@ -1423,7 +1423,8 @@ class Handler(BaseHTTPRequestHandler):
         audit(self.who, "conclusion_printed", room.code)
         payload = {"center": clean_text(b.get("center"), 200), "doctor": clean_text(b.get("doctor"), 200),
                    "patient": clean_text(b.get("patient"), 200), "date": clean_text(b.get("date"), 40),
-                   "conclusion": clean_conclusion(b.get("conclusion") or {})}
+                   "conclusion": clean_conclusion(b.get("conclusion") or {}),
+                   "lang": "en" if b.get("lang") == "en" else "ru"}
         if _ServiceClient is None:
             return self.send_json(503, {"error": "service_unavailable", "service": "reports", "degraded": True,
                                         "message": "Сервис отчётов не подключён"}, {"Retry-After": "30"})

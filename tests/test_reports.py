@@ -70,6 +70,13 @@ def main():
         h2 = d.get("html", "") if isinstance(d, dict) else ""
         check(s == 200 and "J06.9" in h2 and "[текст сокращён]" not in h2, "длинный диагноз (7900 знаков) печатается целиком и не вытесняет код МКБ-10")
         check("<b>Пётр</b>" not in h and "&lt;b&gt;" in h, "пользовательский текст экранирован")
+        s, d, _ = call("POST", "/rooms/%s/render-conclusion" % code, dict(payload, lang="en", center="Медицинский центр"), tok)
+        he = d.get("html", "") if isinstance(d, dict) else ""
+        check(s == 200 and 'lang="en"' in he and "Consultation report" in he and "ICD-10 code</h2>" in he and "Doctor&#x27;s signature" in he
+              and "Medical center" in he and "кашель" in he,
+              "английская форма: подписи на английском, название центра по умолчанию переведено, текст врача как есть")
+        s, d, _ = call("POST", "/rooms/%s/render-conclusion" % code, dict(payload, lang="xx"), tok)
+        check(s == 200 and 'lang="ru"' in d.get("html", ""), "неизвестный язык: русская форма")
         s, d, _ = call("POST", "/rooms/%s/render-conclusion" % code, dict(payload, conclusion={"icd": "xx"}), tok)
         check(s == 400, "неверный код МКБ отклонён на gateway (400)")
 

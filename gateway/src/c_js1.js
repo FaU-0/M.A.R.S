@@ -204,6 +204,8 @@ const Ui = {
   otherLang() { return LANG === 'ru' ? 'en' : 'ru'; },
   langName(l) { return l === 'en' ? 'English' : 'Русский'; },
   langToggle() { const o = this.otherLang(); return h('button', { class: 'btn sec', lang: o, onclick: () => this.setLang(o) }, icon('text'), this.langName(o)); },
+  /* сворачиваемый блок; открыт, если внутри уже что-то заполнено */
+  fold(title, ...kids) { return h('details', { class: 'fold' }, h('summary', { text: title }), h('div', { class: 'stack' }, ...kids)); },
   sound() {
     try {
       const AC = window.AudioContext || window.webkitAudioContext; if (!AC) return;

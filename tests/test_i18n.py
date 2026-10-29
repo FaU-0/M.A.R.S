@@ -40,11 +40,11 @@ def main():
                 missing.append("%s: %s" % (p.name, m.group(1)))
         stripped = re.sub(r"/\*.*?\*/", "", code, flags=re.S)
         stripped = re.sub(r"(?m)//[^\n]*", "", stripped)
-        for m in re.finditer(r"(?<!T\()'((?:[^'\\\n]|\\.)*[А-Яа-яЁё](?:[^'\\\n]|\\.)*)'", stripped):
+        for m in re.finditer(r"(?<!T\()(?<!RU\()'((?:[^'\\\n]|\\.)*[А-Яа-яЁё](?:[^'\\\n]|\\.)*)'", stripped):
             if len(m.group(1)) > 1 and m.group(1) not in LANG_NAMES:  # одиночные буквы — горячие клавиши в русской раскладке
                 bare.append("%s: %s" % (p.name, m.group(1)))
     check(not missing, "у каждой строки T('...') есть перевод" + ("" if not missing else ": нет для " + "; ".join(missing[:5])))
-    check(not bare, "русские строки интерфейса не выводятся мимо T()" + ("" if not bare else ": " + "; ".join(bare[:5])))
+    check(not bare, "русские строки интерфейса не выводятся мимо T() (значения данных помечены RU())" + ("" if not bare else ": " + "; ".join(bare[:5])))
     print("  (строк в интерфейсе через T: %d)" % len(used))
     print("\nИтог: " + ("всё прошло" if not FAILED else "есть ошибки: %d" % len(FAILED)))
     raise SystemExit(1 if FAILED else 0)

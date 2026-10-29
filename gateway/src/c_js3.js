@@ -384,7 +384,7 @@ const Print = {
   async conclusion(d) {
     // Сначала сервис reports; если он недоступен, печатаем формой из браузера
     try {
-      const r = await Api.post('/rooms/' + Api.room + '/render-conclusion', d);
+      const r = await Api.post('/rooms/' + Api.room + '/render-conclusion', Object.assign({}, d, { lang: LANG }));
       if (r && r.html) { this.frame(r.html); return; }
     } catch (e) { /* запасной путь ниже */ }
     this.conclusionLocal(d);
@@ -424,29 +424,36 @@ const Record = {
   deb(k, fn, ms) { clearTimeout(this.timers[k]); this.timers[k] = setTimeout(fn, ms || 800); },
   cardPane() {
     const mk = (key, label, el) => { this.f[key] = el; el.addEventListener('input', () => this.deb('card', () => this.saveCard())); return Ui.field(label, el); };
-    const sel = (opts) => { const s = h('select', { class: 'inp' }); for (const o of opts) s.append(h('option', { value: o, text: o || T('Не указано') })); return s; };
+    /* в базе хранится исходное значение, на экране — перевод */
+    const sel = (opts) => { const s = h('select', { class: 'inp' }); for (const o of opts) s.append(h('option', { value: o, text: o ? T(o) : T('Не указано') })); return s; };
     this.loc = { address: Ui.input('text', T('Город, улица, дом, квартира')), phone: Ui.input('tel', '+7 ...') };
     for (const k in this.loc) this.loc[k].addEventListener('input', () => this.deb('loc', () => this.saveLocation().catch(() => { })));
     this.notes = h('textarea', { class: 'inp', placeholder: T('Видны только врачу'), rows: 4 });
     this.notes.addEventListener('input', () => this.deb('notes', () => Api.post('/rooms/' + Api.room + '/protocol', { notes: this.notes.value }).catch(Toast.err)));
     const hist = Files.hist = h('div', { class: 'stack' });
-    return h('div', { class: 'stack' },
+    /* открыто то, что нужно на каждом приёме; анамнез и заметки свёрнуты, пока пустые */
+    this.histFold = Ui.fold(T('Анамнез: кровь, аллергии, болезни, препараты'),
+      mk('blood', T('Группа крови'), sel(['', 'O(I) Rh+', 'O(I) Rh-', 'A(II) Rh+', 'A(II) Rh-', 'B(III) Rh+', 'B(III) Rh-', 'AB(IV) Rh+', 'AB(IV) Rh-'])),
+      mk('allergies', T('Аллергии'), h('textarea', { class: 'inp', rows: 2 })), mk('chronic', T('Хронические заболевания'), h('textarea', { class: 'inp', rows: 2 })),
+      mk('meds', T('Принимаемые препараты'), h('textarea', { class: 'inp', rows: 2 })));
+    this.notesFold = Ui.fold(T('Приватные заметки'), this.notes, h('p', { class: 'note', style: 'margin:0', text: T('Заметки и карточка пациенту не передаются.') }));
+    return h('div', { class: 'stack card' },
       h('div', { class: 'rowb' }, h('h3', { text: T('Пациент') }), h('span', { class: 'chip', text: T('со слов пациента') })),
       mk('full_name', T('ФИО'), Ui.input('text')), mk('birth', T('Дата рождения'), Ui.input('date')),
-      mk('sex', T('Пол'), sel(['', T('Женский'), T('Мужской')])), mk('blood', T('Группа крови'), sel(['', 'O(I) Rh+', 'O(I) Rh-', 'A(II) Rh+', 'A(II) Rh-', 'B(III) Rh+', 'B(III) Rh-', 'AB(IV) Rh+', 'AB(IV) Rh-'])),
-      mk('allergies', T('Аллергии'), h('textarea', { class: 'inp', rows: 2 })), mk('chronic', T('Хронические заболевания'), h('textarea', { class: 'inp', rows: 2 })),
-      mk('meds', T('Принимаемые препараты'), h('textarea', { class: 'inp', rows: 2 })), mk('complaints', T('Жалобы'), h('textarea', { class: 'inp', rows: 3 })),
-      h('h3', { text: T('Местонахождение пациента') }),
-      Ui.field(T('Адрес (обязательно)'), this.loc.address), Ui.field(T('Телефон (обязательно)'), this.loc.phone),
-      h('div', { class: 'banner warn', style: 'border-radius:var(--r1)', text: T('Экстренные службы: 103 / 112') }),
-      h('h3', { text: T('Приватные заметки') }), this.notes,
-      h('p', { class: 'note', style: 'margin:0', text: T('Заметки и карточка пациенту не передаются.') }), hist);
+      mk('sex', T('Пол'), sel(['', RU('Женский'), RU('Мужской')])),
+      h('div', { class: 'locbox stack' }, h('h3', { text: T('Местонахождение пациента') }),
+        Ui.field(T('Адрес (обязательно)'), this.loc.address), Ui.field(T('Телефон (обязательно)'), this.loc.phone),
+        h('p', { class: 'note', style: 'margin:0', text: T('Экстренные службы: 103 / 112') })),
+      mk('complaints', T('Жалобы'), h('textarea', { class: 'inp', rows: 3 })),
+      this.histFold, this.notesFold, hist);
   },
   load(p) {
     const c = p.card || {};
     for (const k in this.f) this.f[k].value = c[k] || '';
     this.loc.address.value = (p.location && p.location.address) || ''; this.loc.phone.value = (p.location && p.location.phone) || '';
     this.notes.value = p.notes || '';
+    this.histFold.open = ['blood', 'allergies', 'chronic', 'meds'].some(k => (this.f[k].value || '').trim());
+    this.notesFold.open = !!this.notes.value.trim();
     this.fillConcl(p.conclusion || {});
     this.lastConcl = p.conclusion || null;
     FaceMesh.loadProto(p);

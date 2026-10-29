@@ -19,24 +19,46 @@ def _t(v, limit=TEXT_LIMIT):
     return escape(s[:limit]) + (" [текст сокращён]" if len(s) > limit else "")
 
 
-def conclusion_html(d):
-    """d: {center, doctor, patient, date, conclusion:{complaints, anamnesis, diagnosis, icd, recommendations, followup}}"""
-    c = d.get("conclusion") or {}
+# подписи формы по языку интерфейса; текст, который написал врач, не переводится
+LABELS = {
+    "ru": {"title": "Заключение консультации", "patient": "Пациент", "date": "Дата", "doctor": "Врач",
+           "complaints": "Жалобы", "anamnesis": "Анамнез", "diagnosis": "Диагноз", "icd": "Код МКБ-10",
+           "recommendations": "Рекомендации", "followup": "Повторный контакт",
+           "note": "Документ сформирован по результатам дистанционной консультации. "
+                   "Это заключение консультации, а не электронный рецепт.",
+           "sign": "Подпись врача"},
+    "en": {"title": "Consultation report", "patient": "Patient", "date": "Date", "doctor": "Doctor",
+           "complaints": "Complaints", "anamnesis": "History", "diagnosis": "Diagnosis", "icd": "ICD-10 code",
+           "recommendations": "Recommendations", "followup": "Follow-up contact",
+           "note": "Document produced after a remote consultation. "
+                   "This is a consultation report, not an electronic prescription.",
+           "sign": "Doctor's signature"},
+}
+# название центра по умолчанию (CENTER_NAME не задан) переводится; заданное клиникой остаётся как есть
+DEFAULT_CENTER = {"en": {"Медицинский центр": "Medical center"}}
 
-    def row(title, value):
-        return "<h2>%s</h2><p class=\"pre\">%s</p>" % (escape(title), _t(value) or "-")
+
+def conclusion_html(d):
+    """d: {center, doctor, patient, date, lang, conclusion:{complaints, anamnesis, diagnosis, icd, recommendations, followup}}"""
+    lang = d.get("lang") if d.get("lang") in LABELS else "ru"
+    L = LABELS[lang]
+    c = d.get("conclusion") or {}
+    center = DEFAULT_CENTER.get(lang, {}).get(d.get("center"), d.get("center"))
+
+    def row(key, value):
+        return "<h2>%s</h2><p class=\"pre\">%s</p>" % (escape(L[key]), _t(value) or "-")
 
     body = [
-        "<h1>%s</h1><h2>Заключение консультации</h2>" % _t(d.get("center"), 200),
-        "<table><tr><th>Пациент</th><td>%s</td></tr><tr><th>Дата</th><td>%s</td></tr><tr><th>Врач</th><td>%s</td></tr></table>"
-        % (_t(d.get("patient"), 200), _t(d.get("date"), 40), _t(d.get("doctor"), 200)),
+        "<h1>%s</h1><h2>%s</h2>" % (_t(center, 200), escape(L["title"])),
+        "<table><tr><th>%s</th><td>%s</td></tr><tr><th>%s</th><td>%s</td></tr><tr><th>%s</th><td>%s</td></tr></table>"
+        % (escape(L["patient"]), _t(d.get("patient"), 200), escape(L["date"]), _t(d.get("date"), 40),
+           escape(L["doctor"]), _t(d.get("doctor"), 200)),
         # код МКБ-10 отдельной строкой: при длинном диагнозе он не теряется
-        row("Жалобы", c.get("complaints")), row("Анамнез", c.get("anamnesis")), row("Диагноз", c.get("diagnosis")),
-        row("Код МКБ-10", c.get("icd")),
-        row("Рекомендации", c.get("recommendations")), row("Повторный контакт", c.get("followup")),
-        "<p class=\"sm\">Документ сформирован по результатам дистанционной консультации. "
-        "Это заключение консультации, а не электронный рецепт.</p>",
-        "<div class=\"sign\">Подпись врача ______________________ / %s /</div>" % _t(d.get("doctor"), 200),
+        row("complaints", c.get("complaints")), row("anamnesis", c.get("anamnesis")), row("diagnosis", c.get("diagnosis")),
+        row("icd", c.get("icd")),
+        row("recommendations", c.get("recommendations")), row("followup", c.get("followup")),
+        "<p class=\"sm\">%s</p>" % escape(L["note"]),
+        "<div class=\"sign\">%s ______________________ / %s /</div>" % (escape(L["sign"]), _t(d.get("doctor"), 200)),
     ]
-    return ("<!doctype html><html lang=\"ru\"><head><meta charset=\"utf-8\"><title>Заключение консультации</title>"
-            "<style>%s</style></head><body>%s</body></html>" % (CSS, "".join(body)))
+    return ("<!doctype html><html lang=\"%s\"><head><meta charset=\"utf-8\"><title>%s</title>"
+            "<style>%s</style></head><body>%s</body></html>" % (lang, escape(L["title"]), CSS, "".join(body)))

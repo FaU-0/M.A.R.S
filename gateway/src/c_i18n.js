@@ -11,6 +11,7 @@ document.documentElement.lang = LANG;
 /* десятичный разделитель в показанных числах */
 const DEC = LANG === 'ru' ? ',' : '.';
 const EN = {
+  "Анамнез: кровь, аллергии, болезни, препараты": "History: blood type, allergies, conditions, medications",
   "Администратор": "Administrator",
   "Сменить язык?": "Change language?",
   "Страница перезагрузится, звонок подключится заново.": "The page will reload and the call will reconnect.",
@@ -841,4 +842,6 @@ const EN = {
   "хорошая": "good",
   "● Идёт расшифровка речи": "● Speech transcription is on",
 };
+/* значение данных по-русски (хранится в базе), показывается через T(); тест не считает его забытым переводом */
+const RU = s => s;
 function T(s) { return LANG === 'en' && typeof s === 'string' && Object.prototype.hasOwnProperty.call(EN, s) ? EN[s] : s; }
