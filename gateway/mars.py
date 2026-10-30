@@ -2170,6 +2170,7 @@ button{cursor:pointer;border:0;background:none;padding:0}
 html{scrollbar-color:var(--sep) transparent;accent-color:var(--acc)}
 .mono,td.n,.num{font-variant-numeric:tabular-nums}
 h1,h2,h3{margin:0;font-weight:600}
+p,.note{text-wrap:pretty}h1,h2,h3{text-wrap:balance}
 h1{font-size:34px;line-height:1.15}h2{font-size:22px}h3{font-size:17px}
 .sm{font-size:13px}.mut{color:var(--fg2)}.mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
 .hidden{display:none!important}
