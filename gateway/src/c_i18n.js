@@ -11,6 +11,8 @@ document.documentElement.lang = LANG;
 /* десятичный разделитель в показанных числах */
 const DEC = LANG === 'ru' ? ',' : '.';
 const EN = {
+  "Расшифровка речи пока работает только на русском языке.": "Speech transcription currently works in Russian only.",
+  "Неизвестный вид выгрузки": "Unknown export type",
   "Анамнез: кровь, аллергии, болезни, препараты": "History: blood type, allergies, conditions, medications",
   "Администратор": "Administrator",
   "Сменить язык?": "Change language?",

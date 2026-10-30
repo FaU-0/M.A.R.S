@@ -61,6 +61,8 @@ const Transcript = {
   render() {
     const el = this.el; if (!el) return;
     const d = this.d, st = this.st, kids = [];
+    /* распознавание речи настроено на русский язык: в другом языке интерфейса врач видит это заранее */
+    if (LANG !== 'ru') kids.push(h('div', { class: 'banner warn', style: 'border-radius:var(--r1)', text: T('Расшифровка речи пока работает только на русском языке.') }));
     if (!d) { el.replaceChildren(h('p', { class: 'mut', text: T('Загрузка...') })); return; }
     const live = st && st.chunks ? T('Кусков записи: ') + st.chunks + T(', расшифровано: ') + st.done + (st.queued ? T(', в очереди: ') + st.queued : '') + '.' : '';
     if (d.status === 'none') kids.push(h('p', { style: 'margin:0', text: T('Обезличенной расшифровки пока нет. Она появится после завершения приёма, если пациент дал согласие на расшифровку речи.') }), live ? h('p', { class: 'note', style: 'margin:0', text: live }) : null,

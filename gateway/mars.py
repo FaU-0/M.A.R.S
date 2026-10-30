@@ -594,7 +594,8 @@ SESSION_RECHECK = 60
 SESSION_GRACE = 600
 
 
-class Handler(BaseHTTPRequestHandler):
+class HttpBase(BaseHTTPRequestHandler):
+    """Вывод, ввод, вход врача, маршрутизация, врачи и приёмы. Комнаты и клинические разделы — в RoomsMixin и ClinicalMixin."""
     protocol_version = "HTTP/1.1"
     who = "unknown"  # кто действует в комнате (doctor:<логин> или patient), выставляет room_access
     server_version = "MARS"
@@ -788,7 +789,7 @@ class Handler(BaseHTTPRequestHandler):
         m = re.fullmatch(r"/photos/(\d+)", path)
         if method == "GET" and m:
             return self.h_photo(int(m.group(1)))
-        m = re.fullmatch(r"/rooms/([A-Za-z0-9]{4,12})/(events|join|frames|protocol|measurements|ice-config|info|render-conclusion)", path)
+        m = re.fullmatch(r"/rooms/([A-Za-z0-9]{4,12})/(events|join|frames|protocol|measurements|ice-config|info|render-conclusion|export)", path)
         if m:
             code, sub = m.group(1), m.group(2)
             key = (method, sub)
@@ -798,7 +799,7 @@ class Handler(BaseHTTPRequestHandler):
                 ("POST", "frames"): self.h_frames, ("GET", "protocol"): self.h_protocol_get,
                 ("POST", "protocol"): self.h_protocol_post, ("POST", "measurements"): self.h_meas_post,
                 ("GET", "ice-config"): self.h_ice, ("GET", "info"): self.h_info,
-                ("POST", "render-conclusion"): self.h_render_conclusion,
+                ("POST", "render-conclusion"): self.h_render_conclusion, ("POST", "export"): self.h_export,
             }
             if key in table:
                 return table[key](code)
@@ -1019,6 +1020,9 @@ class Handler(BaseHTTPRequestHandler):
             raise ApiError(404, "not_found", "Файл снимка отсутствует")
         audit(self.actor(doc), "photo_viewed", "", "id=%d" % pid)
         self.reply(200, p.read_bytes(), "image/jpeg")
+
+class RoomsMixin:
+    """Комнаты, события звонка, файлы и снимки. Часть Handler."""
 
     # --- комнаты ---
     def h_rooms_create(self):
@@ -1407,6 +1411,9 @@ class Handler(BaseHTTPRequestHandler):
                 add_event(room, "face", "server", "doctor", {"kind": "photo", "id": pid, "pose": pose, "ts": ts})
         self.send_json(200, {"timestamp": ts, "frame_size": len(raw), "id": pid, "pose": pose, "status": "stored"})
 
+class ClinicalMixin:
+    """Протокол, выгрузки, заключение, анализ лица, расшифровка речи, измерения. Часть Handler."""
+
     # --- протокол ---
     def meta(self, appt):
         d = DB.one("doctors.name", (appt["doctor_id"],)) if appt["doctor_id"] else None
@@ -1414,6 +1421,23 @@ class Handler(BaseHTTPRequestHandler):
         return {"id": appt["id"], "code": appt["code"], "status": appt["status"], "scheduled": appt["scheduled"],
                 "doctor": (d or {}).get("name", ""), "patient_name": (p or {}).get("full_name", ""),
                 "patient_id": appt["patient_id"], "center": CENTER_NAME}
+
+    # выгрузки, которые браузер сохраняет файлом: врач — данные приёма, пациент — только своё заключение
+    EXPORT_KINDS = {"face_report_json": "doctor", "face_report_fhir": "doctor", "repeatability_csv": "doctor",
+                    "compare_image": "doctor", "consultation_json": "doctor", "conclusion_json": "any"}
+
+    def h_export(self, code):
+        """Записывает в журнал аудита выгрузку данных приёма. Браузер сохраняет файл только после ответа 200:
+        выгрузка без записи в журнале невозможна (152-ФЗ: учёт передачи персональных данных)."""
+        room, role = self.need_room(code)
+        b = self.read_json(4096)
+        kind = b.get("kind")
+        if kind not in self.EXPORT_KINDS:
+            raise ApiError(400, "bad_request", "Неизвестный вид выгрузки")
+        if self.EXPORT_KINDS[kind] == "doctor" and role != "doctor":
+            raise ApiError(403, "forbidden", "Только врач")
+        audit(self.who, "export_" + kind, room.code)
+        self.send_json(200, {"ok": True})
 
     def h_render_conclusion(self, code):
         """Печатная форма заключения. Строит сервис reports; если он недоступен, отвечаем 503,
@@ -1742,6 +1766,10 @@ class Handler(BaseHTTPRequestHandler):
                (appt["id"], appt["patient_id"], kind, now(), json.dumps(b, ensure_ascii=False)))
         audit(self.who, "measurements_saved", room.code, kind)
         self.send_json(200, {"status": "stored", "kind": kind})
+
+
+class Handler(RoomsMixin, ClinicalMixin, HttpBase):
+    """Обработчик HTTP gateway: методы собраны из HttpBase и примесей."""
 
 
 # ----------------------------------------------------------------------------
@@ -2370,6 +2398,8 @@ document.documentElement.lang = LANG;
 /* десятичный разделитель в показанных числах */
 const DEC = LANG === 'ru' ? ',' : '.';
 const EN = {
+  "Расшифровка речи пока работает только на русском языке.": "Speech transcription currently works in Russian only.",
+  "Неизвестный вид выгрузки": "Unknown export type",
   "Анамнез: кровь, аллергии, болезни, препараты": "History: blood type, allergies, conditions, medications",
   "Администратор": "Administrator",
   "Сменить язык?": "Change language?",
@@ -3383,6 +3413,12 @@ const Ui = {
     box.append(...btns);
     return box;
   },
+  /* выгрузка данных приёма: сначала запись в журнал аудита, файл сохраняется только после неё */
+  async logExport(kind) {
+    try { await Api.post('/rooms/' + Api.room + '/export', { kind }); return true; }
+    catch (e) { Toast.err(e); return false; }
+  },
+  async exportFile(kind, name, text, mime) { if (await this.logExport(kind)) this.download(name, text, mime); },
   download(name, text, mime) {
     const a = h('a', { href: URL.createObjectURL(new Blob([text], { type: mime || 'application/json' })), download: name });
     document.body.append(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 500);
@@ -4235,7 +4271,7 @@ const Chat = {
     const d = ev.data || {}; const k = 'd' + d.mid; if (this.seen.has(k)) return; this.seen.add(k);
     this.push(ev, h('div', { class: 'stack', style: 'gap:6px' }, h('strong', { text: T('Заключение консультации') }), h('span', { class: 'sm', text: d.doctor ? T('Врач: ') + d.doctor : '' }),
       h('div', { class: 'row wrap' }, h('button', { class: 'btn sec', onclick: () => Print.conclusion(d) }, icon('doc'), T('Открыть и распечатать')),
-        h('button', { class: 'btn sec', onclick: () => Ui.download('zaklyuchenie.json', JSON.stringify(d, null, 2)) }, icon('download'), 'JSON'))));
+        h('button', { class: 'btn sec', onclick: () => Ui.exportFile('conclusion_json', 'zaklyuchenie.json', JSON.stringify(d, null, 2)) }, icon('download'), 'JSON'))));
     Files.addDocRow(ev);
   }
 };
@@ -4437,7 +4473,7 @@ const Record = {
   },
   exportJson() {
     const p = this.payload(); const a = App.proto.appointment || {};
-    Ui.download('konsultaciya-' + (a.code || 'mars') + '.json', JSON.stringify({ schema: 'mars-consultation/1', center: p.center, appointment: { id: a.id, code: a.code, scheduled: a.scheduled }, doctor: p.doctor, patient: this.collectCard(), location: { address: this.loc.address.value, phone: this.loc.phone.value }, conclusion: p.conclusion }, null, 2));
+    Ui.exportFile('consultation_json', 'konsultaciya-' + (a.code || 'mars') + '.json', JSON.stringify({ schema: 'mars-consultation/1', center: p.center, appointment: { id: a.id, code: a.code, scheduled: a.scheduled }, doctor: p.doctor, patient: this.collectCard(), location: { address: this.loc.address.value, phone: this.loc.phone.value }, conclusion: p.conclusion }, null, 2));
   }
 };
 
@@ -5428,7 +5464,7 @@ Object.assign(FaceMesh, {
         st.rows.map(r => h('tr', null, h('td', { text: T(r.label) }), h('td', { class: 'n', text: f(r.diff.mean) + ' ± ' + f(r.diff.sd) + u }), h('td', { class: 'n', text: f(r.diff.mdc) + u })))),
       h('p', { class: 'note', style: 'margin:8px 0 0', text: T('SD — разброс замеров у одного человека. MDC95 — минимальное различимое изменение: если между приёмами разность изменилась меньше, это не отличить от разброса измерения. ') + (st.mm ? T('Все замеры откалиброваны, значения в миллиметрах.') : T('Значения в долях МЗР: для миллиметров нужна калибровка перед серией.')) }),
       h('div', { class: 'row wrap', style: 'margin-top:8px' },
-        h('button', { class: 'btn sec', onclick: () => Ui.download(T('повторяемость-') + new Date().toISOString().slice(0, 10) + '.csv', '\ufeff' + this.Repeat.csv(R.items), 'text/csv') }, icon('download'), T('Таблица (CSV)')),
+        h('button', { class: 'btn sec', onclick: () => Ui.exportFile('repeatability_csv', T('повторяемость-') + new Date().toISOString().slice(0, 10) + '.csv', '\ufeff' + this.Repeat.csv(R.items), 'text/csv') }, icon('download'), T('Таблица (CSV)')),
         h('button', { class: 'btn txt', onclick: () => this.repStop() }, T('Новая серия'))));
   },
   /* порядок документирования лица для врача, который делает это впервые */
@@ -5820,7 +5856,7 @@ FaceMesh.Compare = {
       if (mm) payload.calibration = mm;
       try { await Api.post('/rooms/' + Api.room + '/measurements', payload); F.hist = null; Toast.show(T('Сравнение сохранено в протокол')); } catch (er) { Toast.err(er); e.target.disabled = false; }
     } }, T('Сохранить в протокол'));
-    const dl = h('button', { class: 'btn sec', onclick: () => cv.toBlob(b => { const a = h('a', { href: URL.createObjectURL(b), download: T('сравнение.png') }); document.body.append(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 500); }, 'image/png') }, icon('download'), T('Скачать изображение'));
+    const dl = h('button', { class: 'btn sec', onclick: async () => { if (!(await Ui.logExport('compare_image'))) return; cv.toBlob(b => { const a = h('a', { href: URL.createObjectURL(b), download: T('сравнение.png') }); document.body.append(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 500); }, 'image/png'); } }, icon('download'), T('Скачать изображение'));
     body.replaceChildren(
       Ui.segmented([['wipe', T('Шторка')], ['blend', T('Наложение')]], st.mode, m => { st.mode = m; render(); }, T('Режим сравнения')),
       h('div', { class: 'cmp' }, cv), slider,
@@ -5899,8 +5935,8 @@ FaceMesh.Report = {
           await Promise.all(imgs.map(i => i.decode ? i.decode().catch(() => { }) : Promise.resolve()));
           Print.go(node);
         } }, T('Печать или PDF')),
-        h('button', { class: 'btn sec', onclick: () => Ui.download(T('отчёт-лицо-') + (rep.appointment_id || T('приём')) + '.json', JSON.stringify(rep, null, 2)) }, icon('download'), T('Данные отчёта (JSON)')),
-        h('button', { class: 'btn sec', disabled: !(rep.symmetry || rep.mobility) || null, title: T('HL7 FHIR R4: пациент и наблюдения для медицинской информационной системы'), onclick: () => Ui.download(T('fhir-лицо-') + (rep.appointment_id || T('приём')) + '.json', JSON.stringify(F.Fhir.bundle(rep), null, 2), 'application/fhir+json') }, icon('download'), T('Экспорт FHIR')),
+        h('button', { class: 'btn sec', onclick: () => Ui.exportFile('face_report_json', T('отчёт-лицо-') + (rep.appointment_id || T('приём')) + '.json', JSON.stringify(rep, null, 2)) }, icon('download'), T('Данные отчёта (JSON)')),
+        h('button', { class: 'btn sec', disabled: !(rep.symmetry || rep.mobility) || null, title: T('HL7 FHIR R4: пациент и наблюдения для медицинской информационной системы'), onclick: () => Ui.exportFile('face_report_fhir', T('fhir-лицо-') + (rep.appointment_id || T('приём')) + '.json', JSON.stringify(F.Fhir.bundle(rep), null, 2), 'application/fhir+json') }, icon('download'), T('Экспорт FHIR')),
         h('button', { class: 'btn sec', onclick: async e => { e.target.disabled = true; try { await Api.post('/rooms/' + Api.room + '/measurements', rep); Toast.show(T('Отчёт сохранён в протокол')); } catch (er) { Toast.err(er); } e.target.disabled = false; } }, T('Сохранить в протокол'))));
   }
 };
@@ -6185,6 +6221,8 @@ const Transcript = {
   render() {
     const el = this.el; if (!el) return;
     const d = this.d, st = this.st, kids = [];
+    /* распознавание речи настроено на русский язык: в другом языке интерфейса врач видит это заранее */
+    if (LANG !== 'ru') kids.push(h('div', { class: 'banner warn', style: 'border-radius:var(--r1)', text: T('Расшифровка речи пока работает только на русском языке.') }));
     if (!d) { el.replaceChildren(h('p', { class: 'mut', text: T('Загрузка...') })); return; }
     const live = st && st.chunks ? T('Кусков записи: ') + st.chunks + T(', расшифровано: ') + st.done + (st.queued ? T(', в очереди: ') + st.queued : '') + '.' : '';
     if (d.status === 'none') kids.push(h('p', { style: 'margin:0', text: T('Обезличенной расшифровки пока нет. Она появится после завершения приёма, если пациент дал согласие на расшифровку речи.') }), live ? h('p', { class: 'note', style: 'margin:0', text: live }) : null,

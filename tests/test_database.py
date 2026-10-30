@@ -37,10 +37,11 @@ def check(c, m):
 
 def part_no_sql():
     print("--- gateway без SQL ---")
-    src = (ROOT / "gateway" / "src" / "a_server.py").read_text(encoding="utf-8")
+    # серверная часть gateway разбита на gateway/src/a*.py и склеивается сборкой в mars.py
+    src = "\n".join(p.read_text(encoding="utf-8") for p in sorted((ROOT / "gateway" / "src").glob("a*.py")))
     hits = [l.strip()[:80] for l in src.splitlines()
             if re.search(r"\b(SELECT|INSERT INTO|UPDATE \w+ SET|DELETE FROM|CREATE TABLE|CREATE INDEX)\b", l)]
-    check(not hits, "в gateway/src/a_server.py нет SQL" + ("" if not hits else ": " + "; ".join(hits[:3])))
+    check(not hits, "в gateway/src/a*.py нет SQL" + ("" if not hits else ": " + "; ".join(hits[:3])))
     built = (ROOT / "gateway" / "mars.py").read_text(encoding="utf-8")
     check("import sqlite3" not in built, "gateway/mars.py не импортирует sqlite3")
 

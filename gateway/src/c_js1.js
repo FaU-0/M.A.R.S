@@ -177,6 +177,12 @@ const Ui = {
     box.append(...btns);
     return box;
   },
+  /* выгрузка данных приёма: сначала запись в журнал аудита, файл сохраняется только после неё */
+  async logExport(kind) {
+    try { await Api.post('/rooms/' + Api.room + '/export', { kind }); return true; }
+    catch (e) { Toast.err(e); return false; }
+  },
+  async exportFile(kind, name, text, mime) { if (await this.logExport(kind)) this.download(name, text, mime); },
   download(name, text, mime) {
     const a = h('a', { href: URL.createObjectURL(new Blob([text], { type: mime || 'application/json' })), download: name });
     document.body.append(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 500);

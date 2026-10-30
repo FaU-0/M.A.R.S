@@ -107,6 +107,22 @@ def part_main(tmp):
         check(not any(r[0] == "doctor" for r in rows), "в журнале нет безымянного «doctor»")
         check(all("Аудитов" not in (r[2] or "") for r in rows), "текст поиска (фамилия) в журнал не попал")
 
+        print("--- выгрузки данных ---")
+        for kind in ("face_report_fhir", "face_report_json", "repeatability_csv", "compare_image", "consultation_json"):
+            s, _ = a.call("POST", "/rooms/%s/export" % code, {"kind": kind}, tok=tok)
+            check(s == 200, "выгрузка %s разрешена врачу приёма" % kind)
+        s, _ = a.call("POST", "/rooms/%s/export" % code, {"kind": "conclusion_json"}, tok=pat)
+        check(s == 200, "пациент может скачать своё заключение, выгрузка записывается")
+        acts = [r[0] for r in db.execute("SELECT action FROM audit WHERE action LIKE 'export_%' AND room=?", (code,)).fetchall()]
+        check({"export_face_report_fhir", "export_face_report_json", "export_repeatability_csv", "export_compare_image",
+               "export_consultation_json", "export_conclusion_json"} <= set(acts), "каждая выгрузка записана в журнал аудита")
+        who = {r[0] for r in db.execute("SELECT actor FROM audit WHERE action='export_face_report_fhir'").fetchall()}
+        check(who == {"doctor:doc_a"}, "в записи о выгрузке логин врача")
+        s, _ = a.call("POST", "/rooms/%s/export" % code, {"kind": "<script>"}, tok=tok)
+        check(s == 400, "неизвестный вид выгрузки отклонён (400)")
+        s, _ = a.call("POST", "/rooms/%s/export" % code, {"kind": "face_report_fhir"}, tok=pat)
+        check(s == 403, "пациент не выгружает отчёт по лицу врача (403)")
+
         print("--- отчёт и измерения ---")
         rep = {"kind": "report", "patient": "Аудитов Пётр", "transcript": {"segments": [{"role": "patient", "t": 0, "text": "Меня зовут [ФИО_ПАЦИЕНТА]"}]}}
         s, _ = a.call("POST", "/rooms/%s/measurements" % code, rep, tok=tok)

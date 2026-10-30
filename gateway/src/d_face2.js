@@ -486,7 +486,7 @@ Object.assign(FaceMesh, {
         st.rows.map(r => h('tr', null, h('td', { text: T(r.label) }), h('td', { class: 'n', text: f(r.diff.mean) + ' ± ' + f(r.diff.sd) + u }), h('td', { class: 'n', text: f(r.diff.mdc) + u })))),
       h('p', { class: 'note', style: 'margin:8px 0 0', text: T('SD — разброс замеров у одного человека. MDC95 — минимальное различимое изменение: если между приёмами разность изменилась меньше, это не отличить от разброса измерения. ') + (st.mm ? T('Все замеры откалиброваны, значения в миллиметрах.') : T('Значения в долях МЗР: для миллиметров нужна калибровка перед серией.')) }),
       h('div', { class: 'row wrap', style: 'margin-top:8px' },
-        h('button', { class: 'btn sec', onclick: () => Ui.download(T('повторяемость-') + new Date().toISOString().slice(0, 10) + '.csv', '\ufeff' + this.Repeat.csv(R.items), 'text/csv') }, icon('download'), T('Таблица (CSV)')),
+        h('button', { class: 'btn sec', onclick: () => Ui.exportFile('repeatability_csv', T('повторяемость-') + new Date().toISOString().slice(0, 10) + '.csv', '\ufeff' + this.Repeat.csv(R.items), 'text/csv') }, icon('download'), T('Таблица (CSV)')),
         h('button', { class: 'btn txt', onclick: () => this.repStop() }, T('Новая серия'))));
   },
   /* порядок документирования лица для врача, который делает это впервые */

@@ -301,7 +301,7 @@ const Chat = {
     const d = ev.data || {}; const k = 'd' + d.mid; if (this.seen.has(k)) return; this.seen.add(k);
     this.push(ev, h('div', { class: 'stack', style: 'gap:6px' }, h('strong', { text: T('Заключение консультации') }), h('span', { class: 'sm', text: d.doctor ? T('Врач: ') + d.doctor : '' }),
       h('div', { class: 'row wrap' }, h('button', { class: 'btn sec', onclick: () => Print.conclusion(d) }, icon('doc'), T('Открыть и распечатать')),
-        h('button', { class: 'btn sec', onclick: () => Ui.download('zaklyuchenie.json', JSON.stringify(d, null, 2)) }, icon('download'), 'JSON'))));
+        h('button', { class: 'btn sec', onclick: () => Ui.exportFile('conclusion_json', 'zaklyuchenie.json', JSON.stringify(d, null, 2)) }, icon('download'), 'JSON'))));
     Files.addDocRow(ev);
   }
 };
@@ -503,7 +503,7 @@ const Record = {
   },
   exportJson() {
     const p = this.payload(); const a = App.proto.appointment || {};
-    Ui.download('konsultaciya-' + (a.code || 'mars') + '.json', JSON.stringify({ schema: 'mars-consultation/1', center: p.center, appointment: { id: a.id, code: a.code, scheduled: a.scheduled }, doctor: p.doctor, patient: this.collectCard(), location: { address: this.loc.address.value, phone: this.loc.phone.value }, conclusion: p.conclusion }, null, 2));
+    Ui.exportFile('consultation_json', 'konsultaciya-' + (a.code || 'mars') + '.json', JSON.stringify({ schema: 'mars-consultation/1', center: p.center, appointment: { id: a.id, code: a.code, scheduled: a.scheduled }, doctor: p.doctor, patient: this.collectCard(), location: { address: this.loc.address.value, phone: this.loc.phone.value }, conclusion: p.conclusion }, null, 2));
   }
 };
 

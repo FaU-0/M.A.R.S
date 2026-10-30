@@ -282,7 +282,7 @@ FaceMesh.Compare = {
       if (mm) payload.calibration = mm;
       try { await Api.post('/rooms/' + Api.room + '/measurements', payload); F.hist = null; Toast.show(T('Сравнение сохранено в протокол')); } catch (er) { Toast.err(er); e.target.disabled = false; }
     } }, T('Сохранить в протокол'));
-    const dl = h('button', { class: 'btn sec', onclick: () => cv.toBlob(b => { const a = h('a', { href: URL.createObjectURL(b), download: T('сравнение.png') }); document.body.append(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 500); }, 'image/png') }, icon('download'), T('Скачать изображение'));
+    const dl = h('button', { class: 'btn sec', onclick: async () => { if (!(await Ui.logExport('compare_image'))) return; cv.toBlob(b => { const a = h('a', { href: URL.createObjectURL(b), download: T('сравнение.png') }); document.body.append(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 500); }, 'image/png'); } }, icon('download'), T('Скачать изображение'));
     body.replaceChildren(
       Ui.segmented([['wipe', T('Шторка')], ['blend', T('Наложение')]], st.mode, m => { st.mode = m; render(); }, T('Режим сравнения')),
       h('div', { class: 'cmp' }, cv), slider,
@@ -361,8 +361,8 @@ FaceMesh.Report = {
           await Promise.all(imgs.map(i => i.decode ? i.decode().catch(() => { }) : Promise.resolve()));
           Print.go(node);
         } }, T('Печать или PDF')),
-        h('button', { class: 'btn sec', onclick: () => Ui.download(T('отчёт-лицо-') + (rep.appointment_id || T('приём')) + '.json', JSON.stringify(rep, null, 2)) }, icon('download'), T('Данные отчёта (JSON)')),
-        h('button', { class: 'btn sec', disabled: !(rep.symmetry || rep.mobility) || null, title: T('HL7 FHIR R4: пациент и наблюдения для медицинской информационной системы'), onclick: () => Ui.download(T('fhir-лицо-') + (rep.appointment_id || T('приём')) + '.json', JSON.stringify(F.Fhir.bundle(rep), null, 2), 'application/fhir+json') }, icon('download'), T('Экспорт FHIR')),
+        h('button', { class: 'btn sec', onclick: () => Ui.exportFile('face_report_json', T('отчёт-лицо-') + (rep.appointment_id || T('приём')) + '.json', JSON.stringify(rep, null, 2)) }, icon('download'), T('Данные отчёта (JSON)')),
+        h('button', { class: 'btn sec', disabled: !(rep.symmetry || rep.mobility) || null, title: T('HL7 FHIR R4: пациент и наблюдения для медицинской информационной системы'), onclick: () => Ui.exportFile('face_report_fhir', T('fhir-лицо-') + (rep.appointment_id || T('приём')) + '.json', JSON.stringify(F.Fhir.bundle(rep), null, 2), 'application/fhir+json') }, icon('download'), T('Экспорт FHIR')),
         h('button', { class: 'btn sec', onclick: async e => { e.target.disabled = true; try { await Api.post('/rooms/' + Api.room + '/measurements', rep); Toast.show(T('Отчёт сохранён в протокол')); } catch (er) { Toast.err(er); } e.target.disabled = false; } }, T('Сохранить в протокол'))));
   }
 };
