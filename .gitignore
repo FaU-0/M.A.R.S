@@ -3,3 +3,7 @@ __pycache__/
 .DS_Store
 mars_data/
 speech/.venv/
+
+# инструмент дизайна Impeccable и его рабочие материалы: только локально
+.claude/
+.impeccable/
