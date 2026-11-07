@@ -1,0 +1,240 @@
+{
+ "duration_s": 90.0,
+ "drain_s": 30.0,
+ "boot_s": 60.5,
+ "doctors": 8,
+ "data_dir": "/var/folders/p5/rrs1wg7x78vfw3091mbq3zlw0000gn/T/mars_load_nhrwels2",
+ "cpu_count": 8,
+ "cpu_count_physical": 4,
+ "ram_gb": 8.0,
+ "whisper_threads": "auto",
+ "speech_workers": "2",
+ "speech_venv": ".venv",
+ "nogil": false,
+ "steps": [
+  {
+   "step": 1,
+   "pairs": 1,
+   "t_start": 1794035058.2146611,
+   "t_load_end": 1794035154.9163451,
+   "t_end": 1794035184.9802701,
+   "pending_after_drain": 1,
+   "infos": [
+    {
+     "pair": 0,
+     "appt": 2,
+     "code": "FMZVTJ",
+     "analyze_s": 1.4,
+     "analyze_status": "done",
+     "ended": 1794035154.903,
+     "chunks": {
+      "doctor": 9,
+      "patient": 9
+     }
+    }
+   ],
+   "errors": []
+  },
+  {
+   "step": 2,
+   "pairs": 2,
+   "t_start": 1794035184.981384,
+   "t_load_end": 1794035288.55509,
+   "t_end": 1794035318.613239,
+   "pending_after_drain": 9,
+   "infos": [
+    {
+     "pair": 0,
+     "appt": 3,
+     "code": "WZD87A",
+     "analyze_s": 1.74,
+     "analyze_status": "done",
+     "ended": 1794035278.256,
+     "chunks": {
+      "doctor": 9,
+      "patient": 9
+     }
+    },
+    {
+     "pair": 1,
+     "appt": 4,
+     "code": "5EJ2NQ",
+     "analyze_s": 1.61,
+     "analyze_status": "done",
+     "ended": 1794035288.544,
+     "chunks": {
+      "doctor": 9,
+      "patient": 9
+     }
+    }
+   ],
+   "errors": []
+  },
+  {
+   "step": 4,
+   "pairs": 4,
+   "t_start": 1794035318.615089,
+   "t_load_end": 1794035419.676439,
+   "t_end": 1794035449.8622239,
+   "pending_after_drain": 49,
+   "infos": [
+    {
+     "pair": 0,
+     "appt": 6,
+     "code": "VLSQZY",
+     "analyze_s": 1.58,
+     "analyze_status": "done",
+     "ended": 1794035410.423,
+     "chunks": {
+      "doctor": 9,
+      "patient": 9
+     }
+    },
+    {
+     "pair": 1,
+     "appt": 8,
+     "code": "3WSN5V",
+     "analyze_s": 1.69,
+     "analyze_status": "done",
+     "ended": 1794035419.668,
+     "chunks": {
+      "doctor": 9,
+      "patient": 9
+     }
+    },
+    {
+     "pair": 2,
+     "appt": 7,
+     "code": "P4G8JN",
+     "analyze_s": 1.65,
+     "analyze_status": "done",
+     "ended": 1794035416.269,
+     "chunks": {
+      "doctor": 9,
+      "patient": 9
+     }
+    },
+    {
+     "pair": 3,
+     "appt": 5,
+     "code": "ZKDSXX",
+     "analyze_s": 1.82,
+     "analyze_status": "done",
+     "ended": 1794035410.13,
+     "chunks": {
+      "doctor": 9,
+      "patient": 9
+     }
+    }
+   ],
+   "errors": []
+  },
+  {
+   "step": 8,
+   "pairs": 8,
+   "t_start": 1794035449.864768,
+   "t_load_end": 1794035556.7550452,
+   "t_end": 1794035586.814066,
+   "pending_after_drain": 152,
+   "infos": [
+    {
+     "pair": 0,
+     "appt": 15,
+     "code": "5W7UC3",
+     "analyze_s": 1.61,
+     "analyze_status": "done",
+     "ended": 1794035550.392,
+     "chunks": {
+      "doctor": 9,
+      "patient": 9
+     }
+    },
+    {
+     "pair": 1,
+     "appt": 9,
+     "code": "LR6CP7",
+     "analyze_s": 1.64,
+     "analyze_status": "done",
+     "ended": 1794035541.012,
+     "chunks": {
+      "doctor": 9,
+      "patient": 9
+     }
+    },
+    {
+     "pair": 2,
+     "appt": 14,
+     "code": "DS72AM",
+     "analyze_s": 1.9,
+     "analyze_status": "done",
+     "ended": 1794035548.949,
+     "chunks": {
+      "doctor": 9,
+      "patient": 9
+     }
+    },
+    {
+     "pair": 3,
+     "appt": 10,
+     "code": "KFKAX6",
+     "analyze_s": 1.79,
+     "analyze_status": "done",
+     "ended": 1794035541.648,
+     "chunks": {
+      "doctor": 9,
+      "patient": 9
+     }
+    },
+    {
+     "pair": 4,
+     "appt": 11,
+     "code": "FJURA6",
+     "analyze_s": 1.62,
+     "analyze_status": "done",
+     "ended": 1794035542.059,
+     "chunks": {
+      "doctor": 9,
+      "patient": 9
+     }
+    },
+    {
+     "pair": 5,
+     "appt": 13,
+     "code": "G8TDFE",
+     "analyze_s": 1.97,
+     "analyze_status": "done",
+     "ended": 1794035548.731,
+     "chunks": {
+      "doctor": 9,
+      "patient": 9
+     }
+    },
+    {
+     "pair": 6,
+     "appt": 16,
+     "code": "DW7534",
+     "analyze_s": 1.73,
+     "analyze_status": "done",
+     "ended": 1794035556.746,
+     "chunks": {
+      "doctor": 9,
+      "patient": 9
+     }
+    },
+    {
+     "pair": 7,
+     "appt": 12,
+     "code": "3MUL4C",
+     "analyze_s": 1.62,
+     "analyze_status": "done",
+     "ended": 1794035542.731,
+     "chunks": {
+      "doctor": 9,
+      "patient": 9
+     }
+    }
+   ],
+   "errors": []
+  }
+ ]
+}

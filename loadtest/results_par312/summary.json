@@ -1,0 +1,657 @@
+{
+ "steps": [
+  {
+   "pairs": 1,
+   "requests": 78,
+   "rps": 0.8,
+   "window_s": 96.7,
+   "api_p50_ms": 10.5,
+   "api_p95_ms": 24.1,
+   "api_p99_ms": 156.4,
+   "error_pct": 0.0,
+   "errors": 0,
+   "degraded": 0,
+   "error_kinds": [],
+   "signal_p50_ms": 1.6,
+   "signal_p95_ms": 1.8,
+   "signals": 8,
+   "chunks_sent": 18,
+   "chunks_not_transcribed_at_end": 0,
+   "lag_p50_s": 3.1,
+   "lag_p95_s": 5.1,
+   "lag_max_s": 5.2,
+   "lag_first_half_p50_s": 3.1,
+   "lag_second_half_p50_s": 3.1,
+   "deid_after_end_p50_s": 165.1,
+   "deid_after_end_max_s": 165.1,
+   "deid_done": 1,
+   "appointments": 1,
+   "print_p95_ms": 12.7,
+   "analyze_p50_s": 1.4,
+   "queue_max": {
+    "transcribe": 2,
+    "deidentify": 1
+   },
+   "pending_after_drain": 1,
+   "system_cpu_mean": 38.9,
+   "avail_mb_min": 2443,
+   "db_mb_end": 8.26,
+   "endpoints": {
+    "GET /rooms/{c}/events": {
+     "n": 29,
+     "p50": 12.2,
+     "p95": 20005.6,
+     "p99": 20009.1
+    },
+    "GET /rooms/{c}/ice-config": {
+     "n": 2,
+     "p50": 1.4,
+     "p95": 2.1,
+     "p99": 2.2
+    },
+    "GET /rooms/{c}/info": {
+     "n": 1,
+     "p50": 2.2,
+     "p95": 2.2,
+     "p99": 2.2
+    },
+    "GET /rooms/{c}/jobs/{id}": {
+     "n": 2,
+     "p50": 87.5,
+     "p95": 144.5,
+     "p99": 149.5
+    },
+    "POST /appointments": {
+     "n": 1,
+     "p50": 15.5,
+     "p95": 15.5,
+     "p99": 15.5
+    },
+    "POST /rooms": {
+     "n": 1,
+     "p50": 6.5,
+     "p95": 6.5,
+     "p99": 6.5
+    },
+    "POST /rooms/{c}/analyze": {
+     "n": 1,
+     "p50": 161.5,
+     "p95": 161.5,
+     "p99": 161.5
+    },
+    "POST /rooms/{c}/audio": {
+     "n": 18,
+     "p50": 19.0,
+     "p95": 22.9,
+     "p99": 23.8
+    },
+    "POST /rooms/{c}/events": {
+     "n": 17,
+     "p50": 2.6,
+     "p95": 12.3,
+     "p99": 18.1
+    },
+    "POST /rooms/{c}/join": {
+     "n": 1,
+     "p50": 3.5,
+     "p95": 3.5,
+     "p99": 3.5
+    },
+    "POST /rooms/{c}/protocol": {
+     "n": 4,
+     "p50": 8.6,
+     "p95": 14.5,
+     "p99": 14.9
+    },
+    "POST /rooms/{c}/render-conclusion": {
+     "n": 1,
+     "p50": 12.7,
+     "p95": 12.7,
+     "p99": 12.7
+    }
+   },
+   "cpu_mean": {
+    "gateway": 0.8,
+    "database": 0.6,
+    "speech": 147.8,
+    "assistant": 0.0,
+    "vision": 0.1,
+    "reports": 0.0,
+    "ollama": 96.3,
+    "generator": 0.3
+   },
+   "cpu_max": {
+    "gateway": 13.5,
+    "database": 4.8,
+    "speech": 405.7,
+    "assistant": 0.4,
+    "vision": 3.0,
+    "reports": 0.3,
+    "ollama": 474.5,
+    "generator": 5.4
+   },
+   "rss_max_mb": {
+    "gateway": 50.3,
+    "database": 26.7,
+    "speech": 1164.3,
+    "assistant": 13.5,
+    "vision": 17.4,
+    "reports": 8.0,
+    "ollama": 2093.9,
+    "generator": 34.4
+   },
+   "violations": [],
+   "degradation_pct": {
+    "api_p50_ms": 0.0,
+    "api_p95_ms": 0.0,
+    "api_p99_ms": 0.0,
+    "signal_p95_ms": 0.0,
+    "lag_p50_s": 0.0,
+    "lag_p95_s": 0.0,
+    "print_p95_ms": 0.0,
+    "analyze_p50_s": 0.0,
+    "system_cpu_mean": 0.0
+   }
+  },
+  {
+   "pairs": 2,
+   "requests": 156,
+   "rps": 1.5,
+   "window_s": 103.6,
+   "api_p50_ms": 12.7,
+   "api_p95_ms": 214.5,
+   "api_p99_ms": 291.1,
+   "error_pct": 0.0,
+   "errors": 0,
+   "degraded": 0,
+   "error_kinds": [],
+   "signal_p50_ms": 2.4,
+   "signal_p95_ms": 3.0,
+   "signals": 16,
+   "chunks_sent": 36,
+   "chunks_not_transcribed_at_end": 0,
+   "lag_p50_s": 38.2,
+   "lag_p95_s": 58.3,
+   "lag_max_s": 60.8,
+   "lag_first_half_p50_s": 25.3,
+   "lag_second_half_p50_s": 51.0,
+   "deid_after_end_p50_s": 252.7,
+   "deid_after_end_max_s": 252.7,
+   "deid_done": 1,
+   "appointments": 2,
+   "print_p95_ms": 24.1,
+   "analyze_p50_s": 1.7,
+   "queue_max": {
+    "deidentify": 3,
+    "transcribe": 17
+   },
+   "pending_after_drain": 9,
+   "system_cpu_mean": 97.1,
+   "avail_mb_min": 1149,
+   "db_mb_end": 10.99,
+   "endpoints": {
+    "GET /rooms/{c}/events": {
+     "n": 58,
+     "p50": 21.4,
+     "p95": 20009.0,
+     "p99": 20051.0
+    },
+    "GET /rooms/{c}/ice-config": {
+     "n": 4,
+     "p50": 2.6,
+     "p95": 6.2,
+     "p99": 6.5
+    },
+    "GET /rooms/{c}/info": {
+     "n": 2,
+     "p50": 3.2,
+     "p95": 3.5,
+     "p99": 3.5
+    },
+    "GET /rooms/{c}/jobs/{id}": {
+     "n": 4,
+     "p50": 115.5,
+     "p95": 219.9,
+     "p99": 224.9
+    },
+    "POST /appointments": {
+     "n": 2,
+     "p50": 20.4,
+     "p95": 26.3,
+     "p99": 26.9
+    },
+    "POST /rooms": {
+     "n": 2,
+     "p50": 7.7,
+     "p95": 10.1,
+     "p99": 10.3
+    },
+    "POST /rooms/{c}/analyze": {
+     "n": 2,
+     "p50": 308.9,
+     "p95": 326.0,
+     "p99": 327.5
+    },
+    "POST /rooms/{c}/audio": {
+     "n": 36,
+     "p50": 19.1,
+     "p95": 214.7,
+     "p99": 216.4
+    },
+    "POST /rooms/{c}/events": {
+     "n": 34,
+     "p50": 3.5,
+     "p95": 16.0,
+     "p99": 18.1
+    },
+    "POST /rooms/{c}/join": {
+     "n": 2,
+     "p50": 12.1,
+     "p95": 18.2,
+     "p99": 18.8
+    },
+    "POST /rooms/{c}/protocol": {
+     "n": 8,
+     "p50": 11.4,
+     "p95": 12.6,
+     "p99": 12.8
+    },
+    "POST /rooms/{c}/render-conclusion": {
+     "n": 2,
+     "p50": 17.9,
+     "p95": 24.1,
+     "p99": 24.7
+    }
+   },
+   "cpu_mean": {
+    "gateway": 1.4,
+    "database": 0.7,
+    "speech": 350.9,
+    "assistant": 0.0,
+    "vision": 0.2,
+    "reports": 0.0,
+    "ollama": 338.5,
+    "generator": 0.7
+   },
+   "cpu_max": {
+    "gateway": 24.9,
+    "database": 9.1,
+    "speech": 453.8,
+    "assistant": 0.6,
+    "vision": 6.4,
+    "reports": 0.8,
+    "ollama": 456.6,
+    "generator": 13.1
+   },
+   "rss_max_mb": {
+    "gateway": 40.4,
+    "database": 28.6,
+    "speech": 1295.2,
+    "assistant": 13.4,
+    "vision": 18.4,
+    "reports": 7.9,
+    "ollama": 2113.7,
+    "generator": 29.3
+   },
+   "violations": [
+    "lag_p95_s",
+    "deid_after_end_s"
+   ],
+   "degradation_pct": {
+    "api_p50_ms": 21.0,
+    "api_p95_ms": 790.0,
+    "api_p99_ms": 86.1,
+    "signal_p95_ms": 66.7,
+    "lag_p50_s": 1132.3,
+    "lag_p95_s": 1043.1,
+    "print_p95_ms": 89.8,
+    "analyze_p50_s": 21.4,
+    "system_cpu_mean": 149.6
+   }
+  },
+  {
+   "pairs": 4,
+   "requests": 318,
+   "rps": 3.1,
+   "window_s": 101.1,
+   "api_p50_ms": 12.7,
+   "api_p95_ms": 88.0,
+   "api_p99_ms": 311.1,
+   "error_pct": 0.0,
+   "errors": 0,
+   "degraded": 0,
+   "error_kinds": [],
+   "signal_p50_ms": 2.7,
+   "signal_p95_ms": 3.9,
+   "signals": 32,
+   "chunks_sent": 72,
+   "chunks_not_transcribed_at_end": 11,
+   "lag_p50_s": 106.8,
+   "lag_p95_s": 188.6,
+   "lag_max_s": 197.6,
+   "lag_first_half_p50_s": 72.2,
+   "lag_second_half_p50_s": 166.6,
+   "deid_after_end_p50_s": null,
+   "deid_after_end_max_s": null,
+   "deid_done": 0,
+   "appointments": 4,
+   "print_p95_ms": 10.2,
+   "analyze_p50_s": 1.7,
+   "queue_max": {
+    "deidentify": 6,
+    "transcribe": 54
+   },
+   "pending_after_drain": 49,
+   "system_cpu_mean": 98.4,
+   "avail_mb_min": 1163,
+   "db_mb_end": 16.5,
+   "endpoints": {
+    "GET /rooms/{c}/events": {
+     "n": 119,
+     "p50": 41.8,
+     "p95": 20008.8,
+     "p99": 20021.8
+    },
+    "GET /rooms/{c}/ice-config": {
+     "n": 8,
+     "p50": 2.8,
+     "p95": 5.2,
+     "p99": 5.4
+    },
+    "GET /rooms/{c}/info": {
+     "n": 4,
+     "p50": 4.4,
+     "p95": 4.7,
+     "p99": 4.8
+    },
+    "GET /rooms/{c}/jobs/{id}": {
+     "n": 8,
+     "p50": 43.5,
+     "p95": 283.4,
+     "p99": 304.9
+    },
+    "POST /appointments": {
+     "n": 4,
+     "p50": 17.1,
+     "p95": 19.8,
+     "p99": 20.1
+    },
+    "POST /rooms": {
+     "n": 4,
+     "p50": 7.4,
+     "p95": 10.9,
+     "p99": 11.4
+    },
+    "POST /rooms/{c}/analyze": {
+     "n": 4,
+     "p50": 315.2,
+     "p95": 394.4,
+     "p99": 400.7
+    },
+    "POST /rooms/{c}/audio": {
+     "n": 72,
+     "p50": 18.9,
+     "p95": 55.5,
+     "p99": 247.8
+    },
+    "POST /rooms/{c}/events": {
+     "n": 70,
+     "p50": 5.8,
+     "p95": 17.6,
+     "p99": 25.2
+    },
+    "POST /rooms/{c}/join": {
+     "n": 4,
+     "p50": 6.2,
+     "p95": 6.4,
+     "p99": 6.4
+    },
+    "POST /rooms/{c}/protocol": {
+     "n": 17,
+     "p50": 11.2,
+     "p95": 17.6,
+     "p99": 20.6
+    },
+    "POST /rooms/{c}/render-conclusion": {
+     "n": 4,
+     "p50": 9.4,
+     "p95": 10.2,
+     "p99": 10.3
+    }
+   },
+   "cpu_mean": {
+    "gateway": 2.6,
+    "database": 1.3,
+    "speech": 390.6,
+    "assistant": 0.0,
+    "vision": 0.4,
+    "reports": 0.0,
+    "ollama": 312.6,
+    "generator": 1.4
+   },
+   "cpu_max": {
+    "gateway": 43.3,
+    "database": 15.8,
+    "speech": 742.9,
+    "assistant": 1.6,
+    "vision": 13.3,
+    "reports": 0.1,
+    "ollama": 432.1,
+    "generator": 12.8
+   },
+   "rss_max_mb": {
+    "gateway": 43.1,
+    "database": 36.3,
+    "speech": 1299.8,
+    "assistant": 13.1,
+    "vision": 24.8,
+    "reports": 7.9,
+    "ollama": 2145.7,
+    "generator": 36.8
+   },
+   "violations": [
+    "lag_p95_s",
+    "deid_after_end_s"
+   ],
+   "degradation_pct": {
+    "api_p50_ms": 21.0,
+    "api_p95_ms": 265.1,
+    "api_p99_ms": 98.9,
+    "signal_p95_ms": 116.7,
+    "lag_p50_s": 3345.2,
+    "lag_p95_s": 3598.0,
+    "print_p95_ms": -19.7,
+    "analyze_p50_s": 21.4,
+    "system_cpu_mean": 153.0
+   }
+  },
+  {
+   "pairs": 8,
+   "requests": 648,
+   "rps": 6.1,
+   "window_s": 106.9,
+   "api_p50_ms": 13.2,
+   "api_p95_ms": 175.1,
+   "api_p99_ms": 273.9,
+   "error_pct": 0.0,
+   "errors": 0,
+   "degraded": 0,
+   "error_kinds": [],
+   "signal_p50_ms": 2.8,
+   "signal_p95_ms": 4.0,
+   "signals": 64,
+   "chunks_sent": 144,
+   "chunks_not_transcribed_at_end": 144,
+   "lag_p50_s": null,
+   "lag_p95_s": null,
+   "lag_max_s": null,
+   "lag_first_half_p50_s": null,
+   "lag_second_half_p50_s": null,
+   "deid_after_end_p50_s": null,
+   "deid_after_end_max_s": null,
+   "deid_done": 0,
+   "appointments": 8,
+   "print_p95_ms": 16.8,
+   "analyze_p50_s": 1.7,
+   "queue_max": {
+    "deidentify": 13,
+    "transcribe": 165,
+    "symmetry": 1
+   },
+   "pending_after_drain": 152,
+   "system_cpu_mean": 99.4,
+   "avail_mb_min": 2191,
+   "db_mb_end": 27.41,
+   "endpoints": {
+    "GET /rooms/{c}/events": {
+     "n": 244,
+     "p50": 21.9,
+     "p95": 20007.0,
+     "p99": 20008.6
+    },
+    "GET /rooms/{c}/ice-config": {
+     "n": 16,
+     "p50": 2.6,
+     "p95": 7.0,
+     "p99": 10.9
+    },
+    "GET /rooms/{c}/info": {
+     "n": 8,
+     "p50": 4.2,
+     "p95": 4.2,
+     "p99": 4.2
+    },
+    "GET /rooms/{c}/jobs/{id}": {
+     "n": 16,
+     "p50": 195.9,
+     "p95": 240.2,
+     "p99": 290.7
+    },
+    "POST /appointments": {
+     "n": 8,
+     "p50": 15.1,
+     "p95": 18.6,
+     "p99": 19.0
+    },
+    "POST /rooms": {
+     "n": 8,
+     "p50": 7.2,
+     "p95": 11.6,
+     "p99": 13.3
+    },
+    "POST /rooms/{c}/analyze": {
+     "n": 8,
+     "p50": 273.2,
+     "p95": 492.4,
+     "p99": 533.9
+    },
+    "POST /rooms/{c}/audio": {
+     "n": 144,
+     "p50": 18.8,
+     "p95": 54.7,
+     "p99": 188.7
+    },
+    "POST /rooms/{c}/events": {
+     "n": 144,
+     "p50": 7.0,
+     "p95": 19.2,
+     "p99": 120.2
+    },
+    "POST /rooms/{c}/join": {
+     "n": 8,
+     "p50": 6.5,
+     "p95": 7.6,
+     "p99": 7.7
+    },
+    "POST /rooms/{c}/protocol": {
+     "n": 36,
+     "p50": 10.9,
+     "p95": 14.2,
+     "p99": 41.2
+    },
+    "POST /rooms/{c}/render-conclusion": {
+     "n": 8,
+     "p50": 8.7,
+     "p95": 16.8,
+     "p99": 19.9
+    }
+   },
+   "cpu_mean": {
+    "gateway": 4.4,
+    "database": 2.2,
+    "speech": 377.9,
+    "assistant": 0.0,
+    "vision": 0.6,
+    "reports": 0.0,
+    "ollama": 351.9,
+    "generator": 2.6
+   },
+   "cpu_max": {
+    "gateway": 55.8,
+    "database": 20.7,
+    "speech": 471.5,
+    "assistant": 1.7,
+    "vision": 12.8,
+    "reports": 0.9,
+    "ollama": 442.0,
+    "generator": 42.5
+   },
+   "rss_max_mb": {
+    "gateway": 43.7,
+    "database": 37.3,
+    "speech": 1295.6,
+    "assistant": 13.0,
+    "vision": 25.2,
+    "reports": 7.9,
+    "ollama": 2092.9,
+    "generator": 43.1
+   },
+   "violations": [
+    "lag_p95_s",
+    "deid_after_end_s"
+   ],
+   "degradation_pct": {
+    "api_p50_ms": 25.7,
+    "api_p95_ms": 626.6,
+    "api_p99_ms": 75.1,
+    "signal_p95_ms": 122.2,
+    "lag_p50_s": null,
+    "lag_p95_s": null,
+    "print_p95_ms": 32.3,
+    "analyze_p50_s": 21.4,
+    "system_cpu_mean": 155.5
+   }
+  }
+ ],
+ "totals": {
+  "whisper_rtf_p50": 0.767,
+  "whisper_rtf_p95": 1.002,
+  "whisper_chunks": 121,
+  "deid_elapsed_p50_s": 166.0,
+  "deid_elapsed_max_s": 201.6,
+  "deid_jobs": 3,
+  "limits": {
+   "api_p95_ms": 500,
+   "signal_p95_ms": 1000,
+   "error_pct": 1.0,
+   "lag_p95_s": 30,
+   "deid_after_end_s": 300,
+   "print_p95_ms": 2000
+  },
+  "max_ok_pairs": 1
+ },
+ "meta": {
+  "duration_s": 90.0,
+  "drain_s": 30.0,
+  "boot_s": 60.5,
+  "doctors": 8,
+  "data_dir": "/var/folders/p5/rrs1wg7x78vfw3091mbq3zlw0000gn/T/mars_load_nhrwels2",
+  "cpu_count": 8,
+  "cpu_count_physical": 4,
+  "ram_gb": 8.0,
+  "whisper_threads": "auto",
+  "speech_workers": "2",
+  "speech_venv": ".venv",
+  "nogil": false
+ }
+}

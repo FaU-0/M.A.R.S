@@ -128,7 +128,10 @@ CERT_FILE=cert.pem KEY_FILE=key.pem python run_all.py
 | `CENTER_NAME` | `Медицинский центр` | Название центра в интерфейсе и документах |
 | `MEDIAPIPE_VERSION` | `0.10.14` | Версия MediaPipe Tasks Vision для автозагрузки |
 | `WHISPER_MODEL` | `small` | Модель Whisper для `speech` (`base` быстрее, `small` точнее) |
-| `WHISPER_THREADS` | число ядер | Потоки процессора для Whisper |
+| `WHISPER_THREADS` | число ядер | Потоки процессора для Whisper (всего, делятся между исполнителями) |
+| `SPEECH_WORKERS` | `2` | Сколько пар врач-пациент расшифровывается одновременно. Без GIL (Python 3.14t) — потоки с общей моделью, с GIL — процессы, у каждого своя модель (`shared/parallel.py`) |
+| `SPEECH_VENV` | `.venv` | Окружение speech: `.venv314t` — Python 3.14t без GIL |
+| `SPEECH_NOGIL` | — | `1`: запускать speech с `PYTHON_GIL=0` (PyAV на 3.14t иначе включает GIL обратно) |
 | `MODELS_DIR` | `DATA_DIR/models` | Куда скачиваются модели Whisper |
 | `OLLAMA_URL` | `http://127.0.0.1:11434` | Адрес Ollama для `assistant` |
 | `OLLAMA_MODEL` | `qwen2.5:3b` | Модель Ollama для обезличивания |
