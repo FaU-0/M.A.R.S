@@ -1,0 +1,62 @@
+[
+ {
+  "variant": "без параллельности: Python 3.12, 1 исполнитель",
+  "python": {
+   "python": "3.12.4",
+   "free_threaded_build": false,
+   "gil_enabled": true,
+   "mode": "processes"
+  },
+  "parallel": "processes",
+  "workers": 1,
+  "vad": true,
+  "chunks": 25,
+  "audio_s": 247.5,
+  "wall_s": [
+   86.8,
+   102.7,
+   100.1
+  ],
+  "wall_mean_s": 96.5,
+  "chunks_per_min": 15.5,
+  "chunk_latency_mean_s": 7.12,
+  "fails": 0,
+  "wer_pct": [
+   20.7,
+   20.7,
+   20.7
+  ],
+  "wer_mean_pct": 20.7,
+  "same_text_all_repeats": true
+ },
+ {
+  "variant": "с потоками: Python 3.14t без GIL, 2 исполнителя",
+  "python": {
+   "python": "3.14.10",
+   "free_threaded_build": true,
+   "gil_enabled": false,
+   "mode": "threads"
+  },
+  "parallel": "threads",
+  "workers": 2,
+  "vad": false,
+  "chunks": 25,
+  "audio_s": 247.5,
+  "wall_s": [
+   68.5,
+   69.2,
+   69.5
+  ],
+  "wall_mean_s": 69.1,
+  "chunks_per_min": 21.7,
+  "chunk_latency_mean_s": 5.12,
+  "fails": 0,
+  "wer_pct": [
+   20.7,
+   20.7,
+   20.7
+  ],
+  "wer_mean_pct": 20.7,
+  "same_text_all_repeats": true
+ }
+]
