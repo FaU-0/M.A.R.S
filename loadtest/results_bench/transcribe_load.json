@@ -1,0 +1,149 @@
+{
+ "speak_s": 60.0,
+ "summary": [
+  {
+   "variant": "без параллельности",
+   "pairs": 1,
+   "chunks": 12,
+   "fails": 0,
+   "lag_p50_s": 4.8,
+   "lag_p95_s": 6.8,
+   "lag_max_s": 7.2,
+   "tail_after_speech_s": -3.7,
+   "chunks_per_min": 12.8,
+   "text_same_pct": 100.0,
+   "wer_vs_unloaded_pct": 0.0
+  },
+  {
+   "variant": "без параллельности",
+   "pairs": 2,
+   "chunks": 24,
+   "fails": 0,
+   "lag_p50_s": 17.4,
+   "lag_p95_s": 32.8,
+   "lag_max_s": 35.7,
+   "tail_after_speech_s": 26.5,
+   "chunks_per_min": 16.7,
+   "text_same_pct": 100.0,
+   "wer_vs_unloaded_pct": 0.0
+  },
+  {
+   "variant": "без параллельности",
+   "pairs": 4,
+   "chunks": 48,
+   "fails": 0,
+   "lag_p50_s": 65.8,
+   "lag_p95_s": 118.6,
+   "lag_max_s": 125.6,
+   "tail_after_speech_s": 117.7,
+   "chunks_per_min": 16.2,
+   "text_same_pct": 100.0,
+   "wer_vs_unloaded_pct": 0.0
+  },
+  {
+   "variant": "без параллельности",
+   "pairs": 8,
+   "chunks": 96,
+   "fails": 0,
+   "lag_p50_s": 155.0,
+   "lag_p95_s": 298.6,
+   "lag_max_s": 314.0,
+   "tail_after_speech_s": 309.1,
+   "chunks_per_min": 15.6,
+   "text_same_pct": 100.0,
+   "wer_vs_unloaded_pct": 0.0
+  },
+  {
+   "variant": "с потоками",
+   "pairs": 1,
+   "chunks": 12,
+   "fails": 0,
+   "lag_p50_s": 4.1,
+   "lag_p95_s": 5.9,
+   "lag_max_s": 6.1,
+   "tail_after_speech_s": -4.6,
+   "chunks_per_min": 13.0,
+   "text_same_pct": 100.0,
+   "wer_vs_unloaded_pct": 0.0
+  },
+  {
+   "variant": "с потоками",
+   "pairs": 2,
+   "chunks": 24,
+   "fails": 0,
+   "lag_p50_s": 12.0,
+   "lag_p95_s": 17.9,
+   "lag_max_s": 18.4,
+   "tail_after_speech_s": 8.4,
+   "chunks_per_min": 21.0,
+   "text_same_pct": 100.0,
+   "wer_vs_unloaded_pct": 0.0
+  },
+  {
+   "variant": "с потоками",
+   "pairs": 4,
+   "chunks": 48,
+   "fails": 0,
+   "lag_p50_s": 42.5,
+   "lag_p95_s": 76.1,
+   "lag_max_s": 80.2,
+   "tail_after_speech_s": 72.2,
+   "chunks_per_min": 21.8,
+   "text_same_pct": 100.0,
+   "wer_vs_unloaded_pct": 0.0
+  },
+  {
+   "variant": "с потоками",
+   "pairs": 8,
+   "chunks": 96,
+   "fails": 0,
+   "lag_p50_s": 107.6,
+   "lag_p95_s": 200.3,
+   "lag_max_s": 208.6,
+   "tail_after_speech_s": 202.8,
+   "chunks_per_min": 21.9,
+   "text_same_pct": 100.0,
+   "wer_vs_unloaded_pct": 0.0
+  }
+ ],
+ "variants": [
+  {
+   "variant": "без параллельности",
+   "desc": "Python 3.12, 1 исполнитель",
+   "ready": {
+    "ready": true,
+    "service": "speech",
+    "model": "small",
+    "loaded_in": 5.2,
+    "parallel": "processes",
+    "workers": 1,
+    "python": {
+     "python": "3.12.4",
+     "free_threaded_build": false,
+     "gil_enabled": true,
+     "mode": "processes"
+    },
+    "vad": true
+   }
+  },
+  {
+   "variant": "с потоками",
+   "desc": "Python 3.14t без GIL, 2 исполнителя",
+   "ready": {
+    "ready": true,
+    "service": "speech",
+    "model": "small",
+    "loaded_in": 4.3,
+    "parallel": "threads",
+    "workers": 2,
+    "python": {
+     "python": "3.14.10",
+     "free_threaded_build": true,
+     "gil_enabled": false,
+     "mode": "threads"
+    },
+    "vad": false
+   }
+  }
+ ]
+}
