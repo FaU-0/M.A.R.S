@@ -44,7 +44,8 @@ VISION_KINDS = ("symmetry", "mobility", "compare", "calibrate")
 JOB_SERVICES = {
     "vision": {"kinds": VISION_KINDS, "timeout": 10.0, "max_attempts": 20},
     # куски речи ждут, пока speech не вернётся (в пределах JOB_KEEP); кусок 10 с на процессоре идёт несколько секунд
-    "speech": {"kinds": ("transcribe",), "timeout": 120.0, "max_attempts": None},
+    # куски разных пар расшифровываются одновременно (SPEECH_WORKERS), куски одной пары — по порядку
+    "speech": {"kinds": ("transcribe",), "timeout": 120.0, "max_attempts": None, "workers": max(1, int(os.environ.get("SPEECH_WORKERS") or 2))},
     # обезличивание всей расшифровки: окна текста по очереди через Ollama, на процессоре это минуты
     "assistant": {"kinds": ("deidentify",), "timeout": 1800.0, "max_attempts": None},
 }
@@ -274,6 +275,8 @@ def run_job(job, svc):
 
 def jobs_loop(stop_evt, svc):
     kinds = JOB_SERVICES[svc]["kinds"]
+    if JOB_SERVICES[svc].get("workers", 1) > 1:
+        return jobs_loop_parallel(stop_evt, svc, kinds, JOB_SERVICES[svc]["workers"])
     while not stop_evt.is_set():
         JOB_EVTS[svc].wait(1.0)
         JOB_EVTS[svc].clear()
@@ -287,6 +290,45 @@ def jobs_loop(stop_evt, svc):
             pass  # база недоступна: очередь подождёт
         except Exception:
             log.exception("очередь заданий %s", svc)
+
+
+def _run_job_logged(job, svc):
+    try:
+        return run_job(job, svc)
+    except DatabaseUnavailable:
+        return False  # база недоступна: задание осталось в очереди и будет взято снова
+    except Exception:
+        log.exception("задание %d (%s)", job["id"], svc)
+        return False
+
+
+def jobs_loop_parallel(stop_evt, svc, kinds, workers):
+    """Несколько заданий сервиса одновременно, но не больше одного на приём: куски одной пары врач-пациент
+    идут по порядку, куски разных пар — параллельно. Потоки здесь только ждут ответа сервиса (ввод-вывод),
+    саму расшифровку распараллеливает сервис speech (потоки на Python без GIL, иначе процессы)."""
+    busy = {}  # приём -> задание в работе
+    pool = concurrent.futures.ThreadPoolExecutor(workers, thread_name_prefix="jobs-" + svc)
+    while not stop_evt.is_set():
+        JOB_EVTS[svc].wait(1.0)
+        JOB_EVTS[svc].clear()
+        for appt in [a for a, f in busy.items() if f.done()]:
+            del busy[appt]
+        if not service_enabled(svc) or len(busy) >= workers:
+            continue
+        try:
+            for job in DB.q("jobs.due", (now(), list(kinds))):
+                if stop_evt.is_set() or len(busy) >= workers:
+                    break
+                if job["appt_id"] in busy:
+                    continue  # у этой пары кусок уже в работе: следующий пойдёт после него
+                fut = pool.submit(_run_job_logged, job, svc)
+                fut.add_done_callback(lambda _f: JOB_EVTS[svc].set())
+                busy[job["appt_id"]] = fut
+        except DatabaseUnavailable:
+            pass  # база недоступна: очередь подождёт
+        except Exception:
+            log.exception("очередь заданий %s", svc)
+    pool.shutdown(wait=False)
 
 
 def jobs_cleanup():

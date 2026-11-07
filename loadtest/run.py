@@ -123,7 +123,8 @@ def service_procs(stack):
             out["gateway"] = p
         for n in SERVICES:
             if "%s.main" % n in cl:
-                out[n] = p
+                # процессы пула (режим «процессы» в speech) считаются вместе с сервисом
+                out[n] = [p] + p.children(recursive=True)
     out["run_all"] = psutil.Process(stack.pid)
     # Ollama не входит в run_all: это отдельные процессы ollama serve и llama-server
     out["ollama"] = [p for p in psutil.process_iter(["name", "cmdline"])
@@ -343,6 +344,9 @@ def main():
     ap.add_argument("--duration", type=float, default=120, help="длительность приёма, с (по умолчанию 120)")
     ap.add_argument("--drain", type=float, default=60, help="сколько ждать разбора очереди после ступени, с")
     ap.add_argument("--whisper-threads", default="", help="WHISPER_THREADS для speech (пусто — по числу ядер)")
+    ap.add_argument("--speech-workers", default="", help="SPEECH_WORKERS: сколько пар расшифровывается одновременно")
+    ap.add_argument("--speech-venv", default="", help="окружение speech: .venv (по умолчанию) или .venv314t (Python 3.14t)")
+    ap.add_argument("--nogil", action="store_true", help="для .venv314t: PYTHON_GIL=0, чтобы PyAV не включал GIL")
     ap.add_argument("--out", default=str(LT / "results"))
     a = ap.parse_args()
     out = Path(a.out)
@@ -355,6 +359,12 @@ def main():
 
     data_dir = Path(tempfile.mkdtemp(prefix="mars_load_"))
     env = {"WHISPER_THREADS": a.whisper_threads} if a.whisper_threads else {}
+    if a.speech_workers:
+        env["SPEECH_WORKERS"] = a.speech_workers
+    if a.speech_venv:
+        env["SPEECH_VENV"] = a.speech_venv
+    if a.nogil:
+        env["SPEECH_NOGIL"] = "1"
     stack, boot_s = start_stack(data_dir, env)
     stop = threading.Event()
     res_rows, q_rows = [], []
@@ -403,7 +413,8 @@ def main():
         write_csv(out / "queue.csv", ["t", "step", "kind", "status", "n"], [(r["t"], r["step"], r["kind"], r["status"], r["n"]) for r in q_rows])
         meta = {"duration_s": a.duration, "drain_s": a.drain, "boot_s": boot_s, "doctors": MAX_DOCTORS, "data_dir": str(data_dir),
                 "cpu_count": psutil.cpu_count(), "cpu_count_physical": psutil.cpu_count(logical=False),
-                "ram_gb": round(psutil.virtual_memory().total / 2 ** 30, 1), "whisper_threads": a.whisper_threads or "auto", "steps": steps}
+                "ram_gb": round(psutil.virtual_memory().total / 2 ** 30, 1), "whisper_threads": a.whisper_threads or "auto",
+                "speech_workers": a.speech_workers or "2 (по умолчанию)", "speech_venv": a.speech_venv or ".venv", "nogil": a.nogil, "steps": steps}
         (out / "steps.json").write_text(json.dumps(meta, ensure_ascii=False, indent=1), encoding="utf-8")
         stack.terminate()
         try:

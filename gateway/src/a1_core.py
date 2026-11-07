@@ -6,6 +6,7 @@ M.A.R.S. - Mobility & Asymmetry Reporting Sessions: связь в локальн
 Сервер: только стандартная библиотека. Клиент: без CDN, MediaPipe отдаётся локально с /vendor.
 """
 import base64
+import concurrent.futures
 import hashlib
 import heapq
 import hmac

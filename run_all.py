@@ -45,14 +45,19 @@ def main():
     def cmd(n):
         if n == "gateway":
             return [sys.executable, str(ROOT / "gateway" / "mars.py")]
-        venv = ROOT / n / ".venv" / "bin" / "python"  # у тяжёлого сервиса может быть своё окружение (speech: faster-whisper)
+        # у тяжёлого сервиса может быть своё окружение (speech: faster-whisper); SPEECH_VENV=.venv314t — Python 3.14t без GIL
+        venv = ROOT / n / ((env.get("SPEECH_VENV") or ".venv") if n == "speech" else ".venv") / "bin" / "python"
         return [str(venv) if venv.exists() else sys.executable, "-m", n + ".main"]
 
     procs = {}
     started = {}
 
     def start(n):
-        procs[n] = subprocess.Popen(cmd(n), cwd=str(ROOT), env=env)
+        e = env
+        if n == "speech" and env.get("SPEECH_NOGIL") == "1":
+            # PyAV на 3.14t включает GIL при импорте; PYTHON_GIL=0 держит его выключенным (только для сборки без GIL)
+            e = dict(env, PYTHON_GIL="0")
+        procs[n] = subprocess.Popen(cmd(n), cwd=str(ROOT), env=e)
         started[n] = time.time()
 
     def on_term(*_):  # SIGTERM тоже останавливает дочерние сервисы, иначе они остаются сиротами

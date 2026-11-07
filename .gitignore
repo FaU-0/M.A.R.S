@@ -7,3 +7,7 @@ speech/.venv/
 # инструмент дизайна Impeccable и его рабочие материалы: только локально
 .claude/
 .impeccable/
+
+# Python 3.14t (free-threaded), скачан локально для расшифровки в потоках
+.python314t/
+.python314t_dl/
