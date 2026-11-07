@@ -59,6 +59,12 @@ class Client:
         self.port, self.tok = port, tok
         self.op = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar()))
 
+    def with_token(self, tok):
+        """Тот же вход (cookie), но с токеном комнаты: ссылка врача действует только вместе с его сессией."""
+        c = Client(self.port, tok)
+        c.op = self.op
+        return c
+
     def call(self, method, path, body=None, raw=None, headers=None, timeout=60, record=True):
         h = {"Content-Type": "application/json"}
         h.update(headers or {})
@@ -195,7 +201,7 @@ def consult(i, doc, audio, frames, duration, info):
         info["error"] = "rooms %s %s" % (s, rm)
         return
     code = rm["room"]
-    dcl, pcl = Client(BASE, rm["token"]), Client(BASE)
+    dcl, pcl = doc.with_token(rm["token"]), Client(BASE)
     pcl.call("GET", "/rooms/%s/info" % code)
     s, pj = pcl.call("POST", "/rooms/%s/join" % code, {"consent": True})
     if s != 200:
