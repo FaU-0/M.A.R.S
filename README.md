@@ -73,7 +73,33 @@ speech/.venv/bin/pip install -r speech/requirements.txt
 python run_all.py
 ```
 
-Команда запускает все сервисы и перезапускает упавший. Можно запустить не всё:
+Команда запускает все сервисы и перезапускает упавший.
+
+### Python 3.14t без GIL (по умолчанию, если установлен)
+
+Если в проекте есть `.python314t/` (Python 3.14 в сборке без GIL, free-threaded), `run_all.py` запускает на нём
+gateway и все сервисы, а speech — из `speech/.venv314t`. Тогда куски речи разных пар врач-пациент расшифровываются
+**потоками** с одной моделью Whisper. Без `.python314t/` всё работает как раньше на том Python, которым запущен
+`run_all.py`, и расшифровка идёт **процессами** (у каждого своя модель). Правило выбора — в `shared/parallel.py`.
+
+Установка (Intel Mac; для Apple Silicon — `aarch64-apple-darwin` в имени файла), сверка SHA-256 обязательна:
+
+```
+F=cpython-3.14.10+20261026-x86_64-apple-darwin-freethreaded-install_only.tar.gz
+U=https://github.com/astral-sh/python-build-standalone/releases/download/20261026
+curl -LO "$U/${F//+/%2B}" && curl -LO "$U/SHA256SUMS"
+grep " $F" SHA256SUMS | shasum -a 256 -c -
+mkdir -p .python314t && tar -xzf "$F" -C .python314t
+.python314t/python/bin/python3.14t -m venv speech/.venv314t
+grep -v '^onnxruntime' speech/requirements.txt > /tmp/req314t.txt
+speech/.venv314t/bin/pip install --only-binary=:all: --no-deps -r /tmp/req314t.txt
+```
+
+Ограничения 3.14t: для неё нет сборки `onnxruntime`, поэтому отсечение тишины (VAD) в Whisper выключено; PyAV при
+импорте включает GIL обратно, поэтому speech запускается с `PYTHON_GIL=0` (`SPEECH_NOGIL=0` — не выключать).
+Вернуться к прежнему режиму: `MARS_PYTHON=python3 SPEECH_VENV=.venv python run_all.py`.
+
+Можно запустить не всё:
 
 ```
 python run_all.py --without speech,assistant
@@ -130,8 +156,9 @@ CERT_FILE=cert.pem KEY_FILE=key.pem python run_all.py
 | `WHISPER_MODEL` | `small` | Модель Whisper для `speech` (`base` быстрее, `small` точнее) |
 | `WHISPER_THREADS` | число ядер | Потоки процессора для Whisper (всего, делятся между исполнителями) |
 | `SPEECH_WORKERS` | `2` | Сколько пар врач-пациент расшифровывается одновременно. Без GIL (Python 3.14t) — потоки с общей моделью, с GIL — процессы, у каждого своя модель (`shared/parallel.py`) |
-| `SPEECH_VENV` | `.venv` | Окружение speech: `.venv314t` — Python 3.14t без GIL |
-| `SPEECH_NOGIL` | — | `1`: запускать speech с `PYTHON_GIL=0` (PyAV на 3.14t иначе включает GIL обратно) |
+| `MARS_PYTHON` | `.python314t/…/python3.14t`, если есть, иначе тот, что запустил `run_all.py` | Интерпретатор gateway и сервисов без своего окружения |
+| `SPEECH_VENV` | `.venv314t` вместе с 3.14t, иначе `.venv` | Окружение speech |
+| `SPEECH_NOGIL` | `1` для `.venv314t` | Запускать speech с `PYTHON_GIL=0` (PyAV на 3.14t иначе включает GIL обратно) |
 | `MODELS_DIR` | `DATA_DIR/models` | Куда скачиваются модели Whisper |
 | `OLLAMA_URL` | `http://127.0.0.1:11434` | Адрес Ollama для `assistant` |
 | `OLLAMA_MODEL` | `qwen2.5:3b` | Модель Ollama для обезличивания |

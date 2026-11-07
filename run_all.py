@@ -8,6 +8,10 @@
 
 Упавший сервис перезапускается через несколько секунд, остальные продолжают работать.
 Ctrl+C останавливает всё.
+
+Интерпретатор: по умолчанию Python 3.14t без GIL из .python314t/ (если скачан), speech — из speech/.venv314t,
+и расшифровка разных пар идёт потоками. Иначе — тот Python, которым запущен run_all, и процессы.
+MARS_PYTHON=путь задаёт интерпретатор явно, SPEECH_VENV=.venv — прежнее окружение speech (Python 3.12).
 """
 import argparse
 import os
@@ -19,7 +23,22 @@ import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
+PY314T = ROOT / ".python314t" / "python" / "bin" / "python3.14t"
 SECONDARY = ["database", "vision", "reports", "speech", "assistant"]  # database первым: gateway ждёт его при запуске
+
+
+def base_python(env):
+    """Интерпретатор для gateway и сервисов без своего окружения."""
+    if env.get("MARS_PYTHON"):
+        return env["MARS_PYTHON"]
+    return str(PY314T) if PY314T.exists() else sys.executable
+
+
+def speech_venv(env, base):
+    """Окружение speech: явно заданное, иначе .venv314t вместе с Python 3.14t, иначе прежнее .venv."""
+    if env.get("SPEECH_VENV"):
+        return env["SPEECH_VENV"]
+    return ".venv314t" if base == str(PY314T) and (ROOT / "speech" / ".venv314t" / "bin" / "python").exists() else ".venv"
 
 
 def main():
@@ -42,20 +61,25 @@ def main():
     env["MARS_SERVICES"] = ",".join(secondary)
     env["PYTHONUNBUFFERED"] = "1"
 
+    base = base_python(env)
+    sp_venv = speech_venv(env, base)
+    # на 3.14t PyAV включает GIL при импорте; PYTHON_GIL=0 держит его выключенным (SPEECH_NOGIL=0 — не держать)
+    nogil = env.get("SPEECH_NOGIL", "1" if sp_venv == ".venv314t" else "0") == "1"
+    print("Python: %s; speech: speech/%s%s" % (base, sp_venv, ", PYTHON_GIL=0" if nogil else ""), flush=True)
+
     def cmd(n):
         if n == "gateway":
-            return [sys.executable, str(ROOT / "gateway" / "mars.py")]
-        # у тяжёлого сервиса может быть своё окружение (speech: faster-whisper); SPEECH_VENV=.venv314t — Python 3.14t без GIL
-        venv = ROOT / n / ((env.get("SPEECH_VENV") or ".venv") if n == "speech" else ".venv") / "bin" / "python"
-        return [str(venv) if venv.exists() else sys.executable, "-m", n + ".main"]
+            return [base, str(ROOT / "gateway" / "mars.py")]
+        # у тяжёлого сервиса может быть своё окружение (speech: faster-whisper)
+        venv = ROOT / n / (sp_venv if n == "speech" else ".venv") / "bin" / "python"
+        return [str(venv) if venv.exists() else base, "-m", n + ".main"]
 
     procs = {}
     started = {}
 
     def start(n):
         e = env
-        if n == "speech" and env.get("SPEECH_NOGIL") == "1":
-            # PyAV на 3.14t включает GIL при импорте; PYTHON_GIL=0 держит его выключенным (только для сборки без GIL)
+        if n == "speech" and nogil:
             e = dict(env, PYTHON_GIL="0")
         procs[n] = subprocess.Popen(cmd(n), cwd=str(ROOT), env=e)
         started[n] = time.time()
