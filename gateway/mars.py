@@ -66,6 +66,7 @@ def _env_bool(name, default):
 PORT = int(os.environ.get("PORT", "8000"))
 DATA_DIR = Path(os.environ.get("DATA_DIR", "mars_data")).resolve()
 AUTH_REQUIRED = _env_bool("AUTH_REQUIRED", True)
+PW_MIN, PW_MAX = 8, 200  # длина пароля врача
 CERT_FILE = os.environ.get("CERT_FILE", "")
 KEY_FILE = os.environ.get("KEY_FILE", "")
 TURN_URL = os.environ.get("TURN_URL", "")
@@ -109,6 +110,17 @@ VENDOR_FILES = [
     ("wasm/vision_wasm_nosimd_internal.wasm", "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@{v}/wasm/vision_wasm_nosimd_internal.wasm"),
     ("face_landmarker.task", "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task"),
 ]
+# SHA-256 файлов MediaPipe 0.10.14: сверены с хэшами jsDelivr и MD5 Google Storage (20.11.2026).
+# Файл с другим хэшем не сохраняется и не отдаётся в браузер: подмена на CDN не попадёт к врачу и пациенту.
+# Другая версия (MEDIAPIPE_VERSION) требует новых хэшей здесь.
+VENDOR_SHA256 = {
+    "vision_bundle.mjs": "e77f281f9619150d937023c355bae170e9120e3b9e43f1e23a2a7bee07197669",
+    "wasm/vision_wasm_internal.js": "9440cf0cc0cea21800e31581ec32aeedcc5fbf9df4509796bbc7d3f99e52ab9c",
+    "wasm/vision_wasm_internal.wasm": "f82a8e6c05e08a44cc9f9e7ec5f845935bcbb1b1500ebe8c2f4812fb4e2917dc",
+    "wasm/vision_wasm_nosimd_internal.js": "abe9b6fbeaf86fcb53a5edce3926c82ccb0619e18fed4d9d9ce561ee7f55e054",
+    "wasm/vision_wasm_nosimd_internal.wasm": "38b61feab2fd7934e05cbe9f68baa308978a5e3b7f85c1913bb8ae89b8ef8b97",
+    "face_landmarker.task": "64184e229b263107bc2b804c6625db1341ff2bb731874b0bcc2fe6544e0bc9ff",
+}
 
 log = logging.getLogger("mars")
 DB = None
@@ -278,6 +290,22 @@ def hash_pw(pw, salt):
     return hashlib.scrypt(pw.encode("utf-8"), salt=salt, n=2 ** 14, r=8, p=1, dklen=32)
 
 
+def new_session_cookie(doctor_id):
+    sid = secrets.token_urlsafe(32)
+    DB.run("sessions.add", (sid_hash(sid), doctor_id, now() + SESSION_TTL))
+    cookie = "mars_sid=%s; Path=/; HttpOnly; SameSite=Strict; Max-Age=%d" % (sid, SESSION_TTL)
+    return cookie + "; Secure" if SECURE else cookie
+
+
+def forget_admin_password_file():
+    """Пароль администратора сменён в интерфейсе: открытый текст старого пароля больше не хранится,
+    и при следующем запуске он не перезапишет новый."""
+    try:
+        (DATA_DIR / "admin_password.txt").unlink()
+    except FileNotFoundError:
+        pass
+
+
 def create_doctor(login, name, password, is_admin=0):
     salt = secrets.token_bytes(16)
     return DB.run("doctors.add",
@@ -290,6 +318,13 @@ def bootstrap_admin():
     pfile = DATA_DIR / "admin_password.txt"
     fixed = os.environ.get("ADMIN_PASSWORD", "").strip()
     reset = _env_bool("RESET_ADMIN", False)
+    row = DB.one("doctors.admin_password")
+    if row and not fixed and not reset and not pfile.is_file():
+        print("=" * 64)
+        print("Вход администратора.  Логин: admin   Пароль задан в интерфейсе.")
+        print("Забыли пароль: перезапустите с RESET_ADMIN=1 или ADMIN_PASSWORD=...")
+        print("=" * 64)
+        return
     pw = fixed
     if not pw and not reset and pfile.is_file():
         pw = pfile.read_text(encoding="utf-8").strip()
@@ -300,7 +335,6 @@ def bootstrap_admin():
         os.chmod(str(pfile), 0o600)
     except OSError:
         pass
-    row = DB.one("doctors.admin_password")
     if not row:
         create_doctor("admin", "Администратор", pw, 1)
     elif not hmac.compare_digest(bytes(row["pw"]), hash_pw(pw, bytes(row["salt"]))):
@@ -510,10 +544,47 @@ def patient_card(pid):
 # ----------------------------------------------------------------------------
 # Файлы MediaPipe (vendor)
 # ----------------------------------------------------------------------------
+_VENDOR_OK = {}  # путь -> (mtime_ns, размер): файл уже сверен, повторно не хэшируется
+_VENDOR_LOCK = threading.Lock()
+
+
+def _sha256(path):
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for block in iter(lambda: f.read(1 << 20), b""):
+            h.update(block)
+    return h.hexdigest()
+
+
+def vendor_file_ok(rel):
+    """Файл из списка MediaPipe лежит на диске и его SHA-256 совпадает с записанным."""
+    want = VENDOR_SHA256.get(rel)
+    path = DATA_DIR / "vendor" / rel
+    if not want or not path.is_file():
+        return False
+    st = path.stat()
+    key = (st.st_mtime_ns, st.st_size)
+    with _VENDOR_LOCK:
+        if _VENDOR_OK.get(rel) == key:
+            return True
+    if st.st_size == 0 or not hmac.compare_digest(_sha256(path), want):
+        return False
+    with _VENDOR_LOCK:
+        _VENDOR_OK[rel] = key
+    return True
+
+
 def vendor_missing():
-    vd = DATA_DIR / "vendor"
-    return [(rel, url.format(v=MEDIAPIPE_VERSION)) for rel, url in VENDOR_FILES
-            if not (vd / rel).is_file() or (vd / rel).stat().st_size == 0]
+    """Файлы, которых нет или чей хэш не совпал. Подменённый файл удаляется, чтобы его не отдали в браузер."""
+    out = []
+    for rel, url in VENDOR_FILES:
+        if not vendor_file_ok(rel):
+            bad = DATA_DIR / "vendor" / rel
+            if bad.is_file():
+                log.warning("файл MediaPipe %s не совпал по SHA-256 и удалён", rel)
+                bad.unlink(missing_ok=True)  # /health и фоновая загрузка могут проверять одновременно
+            out.append((rel, url.format(v=MEDIAPIPE_VERSION)))
+    return out
 
 
 def ensure_vendor():
@@ -521,6 +592,7 @@ def ensure_vendor():
     for rel, url in vendor_missing():
         target = vd / rel
         target.parent.mkdir(parents=True, exist_ok=True)
+        tmp = target.with_suffix(target.suffix + ".part")
         try:
             print("Скачиваю %s ..." % rel)
             req = urllib.request.Request(url, headers={"User-Agent": "MARS/1.0"})
@@ -528,11 +600,15 @@ def ensure_vendor():
                 data = resp.read()
             if not data:
                 raise ValueError("пустой ответ")
-            tmp = target.with_suffix(target.suffix + ".part")
+            got = hashlib.sha256(data).hexdigest()
+            if not hmac.compare_digest(got, VENDOR_SHA256[rel]):
+                raise ValueError("SHA-256 не совпал: файл подменён или другой версии, не сохранён")
             tmp.write_bytes(data)
             tmp.replace(target)
-            print("  готово: %s, %.1f КБ" % (rel, len(data) / 1024))
-        except Exception as e:  # сеть недоступна и т.п.
+            print("  готово: %s, %.1f КБ, SHA-256 совпал" % (rel, len(data) / 1024))
+        except Exception as e:  # сеть недоступна, подмена и т.п.
+            if tmp.exists():
+                tmp.unlink()
             print("  не удалось: %s (%s)" % (rel, e))
     miss = vendor_missing()
     if miss:
@@ -771,6 +847,8 @@ class HttpBase(BaseHTTPRequestHandler):
             return self.h_logout()
         if method == "GET" and path == "/auth/me":
             return self.h_me()
+        if method == "POST" and path == "/auth/password":
+            return self.h_password()
         if method == "POST" and path == "/doctors":
             return self.h_doctor_create()
         if path == "/appointments":
@@ -834,8 +912,8 @@ class HttpBase(BaseHTTPRequestHandler):
         if "\x00" in rel or ".." in rel.replace("\\", "/").split("/"):
             raise ApiError(404, "not_found", "Файл не найден")
         p = (vd / rel).resolve()
-        if vd not in p.parents or not p.is_file():
-            raise ApiError(404, "not_found", "Файл не найден")
+        if vd not in p.parents or not p.is_file() or not vendor_file_ok(rel):
+            raise ApiError(404, "not_found", "Файл не найден")  # только файлы MediaPipe из списка и с верным хэшем
         ctype = VENDOR_MIME.get(p.suffix.lower()) or mimetypes.guess_type(p.name)[0] or "application/octet-stream"
         self.reply(200, p.read_bytes(), ctype, {"Cache-Control": "public, max-age=86400"}, False)
 
@@ -849,12 +927,8 @@ class HttpBase(BaseHTTPRequestHandler):
         calc = hash_pw(pw, salt)
         if not row or not hmac.compare_digest(calc, row["pw"]):
             raise ApiError(401, "bad_credentials", "Неверный логин или пароль")
-        sid = secrets.token_urlsafe(32)
-        DB.run("sessions.add", (sid_hash(sid), row["id"], now() + SESSION_TTL))
+        cookie = new_session_cookie(row["id"])
         audit("doctor:%s" % row["login"], "login")
-        cookie = "mars_sid=%s; Path=/; HttpOnly; SameSite=Strict; Max-Age=%d" % (sid, SESSION_TTL)
-        if SECURE:
-            cookie += "; Secure"
         self.send_json(200, {"doctor": {"id": row["id"], "name": row["name"], "login": row["login"],
                                         "admin": bool(row["is_admin"])}}, {"Set-Cookie": cookie})
 
@@ -870,6 +944,32 @@ class HttpBase(BaseHTTPRequestHandler):
         cookie = "mars_sid=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0" + ("; Secure" if SECURE else "")
         self.send_json(200, {"status": "ok"}, {"Set-Cookie": cookie})
 
+    def h_password(self):
+        """Смена своего пароля: нужен текущий пароль. Все сессии врача закрываются, текущая выдаётся заново."""
+        ip_limit(self.client_address[0], "password", 8, 8 / 300.0)  # как у входа: перебор текущего пароля
+        doc = self.doctor()
+        if not doc.get("salt"):
+            raise ApiError(400, "no_password", "Вход по паролю отключён (AUTH_REQUIRED=0)")
+        b = self.read_json(65536)
+        old, new = str(b.get("old_password") or "")[:200], str(b.get("new_password") or "")
+        if not hmac.compare_digest(hash_pw(old, bytes(doc["salt"])), bytes(doc["pw"])):
+            audit(self.actor(doc), "password_change_failed")
+            raise ApiError(403, "bad_credentials", "Неверный текущий пароль")
+        if not PW_MIN <= len(new) <= PW_MAX:
+            raise ApiError(400, "bad_password", "Новый пароль: от %d до %d символов" % (PW_MIN, PW_MAX))
+        if hmac.compare_digest(new.encode("utf-8"), old.encode("utf-8")):
+            raise ApiError(400, "same_password", "Новый пароль совпадает с текущим")
+        salt = secrets.token_bytes(16)
+        DB.run("doctors.set_password", (salt, hash_pw(new, salt), doc["id"]))
+        DB.run("sessions.delete_for_doctor", (doc["id"],))  # украденная сессия перестаёт действовать
+        for key, hit in list(SESSION_SEEN.items()):
+            if hit[0] == doc["login"]:
+                SESSION_SEEN.pop(key, None)
+        if doc["login"] == "admin":
+            forget_admin_password_file()
+        audit(self.actor(doc), "password_changed")
+        self.send_json(200, {"status": "ok"}, {"Set-Cookie": new_session_cookie(doc["id"])})
+
     def h_me(self):
         doc = self.doctor(required=False)
         out = {"auth_required": AUTH_REQUIRED, "center": CENTER_NAME, "doctor": None}
@@ -883,8 +983,8 @@ class HttpBase(BaseHTTPRequestHandler):
             raise ApiError(403, "forbidden", "Только администратор")
         b = self.read_json(65536)
         login, name, pw = clean_text(b.get("login"), 60), clean_text(b.get("name"), 100), str(b.get("password") or "")
-        if not login or not name or len(pw) < 8:
-            raise ApiError(400, "bad_request", "Нужны логин, имя и пароль не короче 8 символов")
+        if not login or not name or not PW_MIN <= len(pw) <= PW_MAX:
+            raise ApiError(400, "bad_request", "Нужны логин, имя и пароль от %d до %d символов" % (PW_MIN, PW_MAX))
         if DB.one("doctors.id_by_login", (login,)):
             raise ApiError(409, "exists", "Логин занят")
         did = create_doctor(login, name, pw, 1 if b.get("admin") else 0)
@@ -2179,7 +2279,6 @@ def main():
         print("Сервис database не отвечает: gateway не запущен")
         return
     bootstrap_admin()
-    ensure_vendor()
     stop_evt = threading.Event()
     try:
         httpd = Srv(("0.0.0.0", PORT), Handler)
@@ -2194,6 +2293,8 @@ def main():
         httpd.socket = ctx.wrap_socket(httpd.socket, server_side=True, do_handshake_on_connect=False)
     rt = Runtime(httpd, DB, stop_evt, COND)
     _MARS_RUNNING = rt
+    # MediaPipe скачивается в фоне: звонок доступен сразу, Face Mesh включается, когда файлы прошли проверку SHA-256
+    threading.Thread(target=ensure_vendor, name="vendor", daemon=True).start()
     threading.Thread(target=cleanup_loop, args=(stop_evt,), daemon=True).start()
     for svc in JOB_SERVICES:
         threading.Thread(target=jobs_loop, args=(stop_evt, svc), daemon=True).start()
@@ -2856,7 +2957,18 @@ const EN = {
   "Нужно минимум два снимка одного ракурса одного пациента.": "At least two photos of the same view of one patient are needed.",
   "Нужны 4 угла карты": "4 card corners are required",
   "Нужны 4 угла карты и МЗР": "4 card corners and the IPD are required",
-  "Нужны логин, имя и пароль не короче 8 символов": "Login, name and a password of at least 8 characters are required",
+  "Нужны логин, имя и пароль от 8 до 200 символов": "Login, name and a password of 8 to 200 characters are required",
+  "Сменить пароль": "Change password",
+  "Текущий пароль": "Current password",
+  "Новый пароль": "New password",
+  "Повторите новый пароль": "Repeat new password",
+  "Новый пароль не короче 8 символов": "The new password must be at least 8 characters",
+  "Пароли не совпадают": "Passwords do not match",
+  "Пароль изменён. На других устройствах нужно войти заново": "Password changed. Sign in again on other devices",
+  "Неверный текущий пароль": "Wrong current password",
+  "Новый пароль совпадает с текущим": "The new password is the same as the current one",
+  "Новый пароль: от 8 до 200 символов": "New password: 8 to 200 characters",
+  "Вход по паролю отключён (AUTH_REQUIRED=0)": "Password sign-in is disabled (AUTH_REQUIRED=0)",
   "Нулевой масштаб нормировки": "Zero normalisation scale",
   "Обе стороны вместе (модель не разделяет): ": "Both sides together (the model does not separate them): ",
   "Обезличенная расшифровка речи, проверена врачом. Метки в квадратных скобках скрывают личные данные.": "De-identified speech transcript, reviewed by the doctor. Labels in square brackets hide personal data.",
@@ -4053,6 +4165,7 @@ const Header = {
       list.append(item('user', T('Освободить место пациента'), async () => { try { await Api.ev('control', { action: 'reset_patient' }); Toast.show(T('Пациент сможет войти заново по ссылке')); } catch (e) { Toast.err(e); } }));
       list.append(item('alert', T('Экстренное завершение'), () => App.emergency(), true));
     }
+    if (Auth.doctor && Cfg.auth) list.append(item('user', T('Сменить пароль'), () => App.passwordSheet()));
     if (Auth.doctor && Cfg.auth) list.append(item('logout', T('Выйти'), () => Auth.logout()));
     s.el.append(list);
   }
@@ -4602,6 +4715,28 @@ const App = {
     $('#main').replaceChildren(h('div', { class: 'center-col' }, h('h2', { text: T('Сеанс недоступен') }),
       h('p', { class: 'mut', text: T('Комната не найдена или доступ к ней потерян (возможно, сервер перезапущен).') }),
       h('button', { class: 'btn pri', onclick: () => { try { sessionStorage.removeItem('mars_pt_' + Session.code); } catch (x) { /* ignore */ } location.reload(); } }, T('Начать заново'))));
+  },
+  passwordSheet() {
+    const cur = Ui.input('password'), nw = Ui.input('password'), rep = Ui.input('password');
+    cur.autocomplete = 'current-password'; nw.autocomplete = 'new-password'; rep.autocomplete = 'new-password';
+    nw.minLength = 8; nw.maxLength = 200; rep.maxLength = 200;
+    const err = h('p', { class: 'mut', role: 'alert', style: 'margin:0;color:var(--badt)' });
+    const s = Ui.sheet({
+      title: T('Сменить пароль'),
+      actions: [{ label: T('Отмена'), kind: 'sec' }, {
+        label: T('Сохранить'), kind: 'pri', keep: true, onClick: async api => {
+          err.textContent = '';
+          if (nw.value.length < 8) { err.textContent = T('Новый пароль не короче 8 символов'); nw.focus(); return; }
+          if (nw.value !== rep.value) { err.textContent = T('Пароли не совпадают'); rep.focus(); return; }
+          try {
+            await Api.post('/auth/password', { old_password: cur.value, new_password: nw.value }, { token: false });
+            api.close();
+            Toast.show(T('Пароль изменён. На других устройствах нужно войти заново'));
+          } catch (e) { err.textContent = (e && e.message) || T('Ошибка'); }
+        }
+      }]
+    });
+    s.el.append(Ui.field(T('Текущий пароль'), cur), Ui.field(T('Новый пароль'), nw), Ui.field(T('Повторите новый пароль'), rep), err);
   },
   async auditSheet() {
     const s = Ui.sheet({ title: T('Журнал аудита'), wide: true });

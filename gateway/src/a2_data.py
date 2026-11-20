@@ -75,6 +75,22 @@ def hash_pw(pw, salt):
     return hashlib.scrypt(pw.encode("utf-8"), salt=salt, n=2 ** 14, r=8, p=1, dklen=32)
 
 
+def new_session_cookie(doctor_id):
+    sid = secrets.token_urlsafe(32)
+    DB.run("sessions.add", (sid_hash(sid), doctor_id, now() + SESSION_TTL))
+    cookie = "mars_sid=%s; Path=/; HttpOnly; SameSite=Strict; Max-Age=%d" % (sid, SESSION_TTL)
+    return cookie + "; Secure" if SECURE else cookie
+
+
+def forget_admin_password_file():
+    """Пароль администратора сменён в интерфейсе: открытый текст старого пароля больше не хранится,
+    и при следующем запуске он не перезапишет новый."""
+    try:
+        (DATA_DIR / "admin_password.txt").unlink()
+    except FileNotFoundError:
+        pass
+
+
 def create_doctor(login, name, password, is_admin=0):
     salt = secrets.token_bytes(16)
     return DB.run("doctors.add",
@@ -87,6 +103,13 @@ def bootstrap_admin():
     pfile = DATA_DIR / "admin_password.txt"
     fixed = os.environ.get("ADMIN_PASSWORD", "").strip()
     reset = _env_bool("RESET_ADMIN", False)
+    row = DB.one("doctors.admin_password")
+    if row and not fixed and not reset and not pfile.is_file():
+        print("=" * 64)
+        print("Вход администратора.  Логин: admin   Пароль задан в интерфейсе.")
+        print("Забыли пароль: перезапустите с RESET_ADMIN=1 или ADMIN_PASSWORD=...")
+        print("=" * 64)
+        return
     pw = fixed
     if not pw and not reset and pfile.is_file():
         pw = pfile.read_text(encoding="utf-8").strip()
@@ -97,7 +120,6 @@ def bootstrap_admin():
         os.chmod(str(pfile), 0o600)
     except OSError:
         pass
-    row = DB.one("doctors.admin_password")
     if not row:
         create_doctor("admin", "Администратор", pw, 1)
     elif not hmac.compare_digest(bytes(row["pw"]), hash_pw(pw, bytes(row["salt"]))):
@@ -307,10 +329,47 @@ def patient_card(pid):
 # ----------------------------------------------------------------------------
 # Файлы MediaPipe (vendor)
 # ----------------------------------------------------------------------------
+_VENDOR_OK = {}  # путь -> (mtime_ns, размер): файл уже сверен, повторно не хэшируется
+_VENDOR_LOCK = threading.Lock()
+
+
+def _sha256(path):
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for block in iter(lambda: f.read(1 << 20), b""):
+            h.update(block)
+    return h.hexdigest()
+
+
+def vendor_file_ok(rel):
+    """Файл из списка MediaPipe лежит на диске и его SHA-256 совпадает с записанным."""
+    want = VENDOR_SHA256.get(rel)
+    path = DATA_DIR / "vendor" / rel
+    if not want or not path.is_file():
+        return False
+    st = path.stat()
+    key = (st.st_mtime_ns, st.st_size)
+    with _VENDOR_LOCK:
+        if _VENDOR_OK.get(rel) == key:
+            return True
+    if st.st_size == 0 or not hmac.compare_digest(_sha256(path), want):
+        return False
+    with _VENDOR_LOCK:
+        _VENDOR_OK[rel] = key
+    return True
+
+
 def vendor_missing():
-    vd = DATA_DIR / "vendor"
-    return [(rel, url.format(v=MEDIAPIPE_VERSION)) for rel, url in VENDOR_FILES
-            if not (vd / rel).is_file() or (vd / rel).stat().st_size == 0]
+    """Файлы, которых нет или чей хэш не совпал. Подменённый файл удаляется, чтобы его не отдали в браузер."""
+    out = []
+    for rel, url in VENDOR_FILES:
+        if not vendor_file_ok(rel):
+            bad = DATA_DIR / "vendor" / rel
+            if bad.is_file():
+                log.warning("файл MediaPipe %s не совпал по SHA-256 и удалён", rel)
+                bad.unlink(missing_ok=True)  # /health и фоновая загрузка могут проверять одновременно
+            out.append((rel, url.format(v=MEDIAPIPE_VERSION)))
+    return out
 
 
 def ensure_vendor():
@@ -318,6 +377,7 @@ def ensure_vendor():
     for rel, url in vendor_missing():
         target = vd / rel
         target.parent.mkdir(parents=True, exist_ok=True)
+        tmp = target.with_suffix(target.suffix + ".part")
         try:
             print("Скачиваю %s ..." % rel)
             req = urllib.request.Request(url, headers={"User-Agent": "MARS/1.0"})
@@ -325,11 +385,15 @@ def ensure_vendor():
                 data = resp.read()
             if not data:
                 raise ValueError("пустой ответ")
-            tmp = target.with_suffix(target.suffix + ".part")
+            got = hashlib.sha256(data).hexdigest()
+            if not hmac.compare_digest(got, VENDOR_SHA256[rel]):
+                raise ValueError("SHA-256 не совпал: файл подменён или другой версии, не сохранён")
             tmp.write_bytes(data)
             tmp.replace(target)
-            print("  готово: %s, %.1f КБ" % (rel, len(data) / 1024))
-        except Exception as e:  # сеть недоступна и т.п.
+            print("  готово: %s, %.1f КБ, SHA-256 совпал" % (rel, len(data) / 1024))
+        except Exception as e:  # сеть недоступна, подмена и т.п.
+            if tmp.exists():
+                tmp.unlink()
             print("  не удалось: %s (%s)" % (rel, e))
     miss = vendor_missing()
     if miss:

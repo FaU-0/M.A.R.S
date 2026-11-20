@@ -66,6 +66,7 @@ def _env_bool(name, default):
 PORT = int(os.environ.get("PORT", "8000"))
 DATA_DIR = Path(os.environ.get("DATA_DIR", "mars_data")).resolve()
 AUTH_REQUIRED = _env_bool("AUTH_REQUIRED", True)
+PW_MIN, PW_MAX = 8, 200  # длина пароля врача
 CERT_FILE = os.environ.get("CERT_FILE", "")
 KEY_FILE = os.environ.get("KEY_FILE", "")
 TURN_URL = os.environ.get("TURN_URL", "")
@@ -109,6 +110,17 @@ VENDOR_FILES = [
     ("wasm/vision_wasm_nosimd_internal.wasm", "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@{v}/wasm/vision_wasm_nosimd_internal.wasm"),
     ("face_landmarker.task", "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task"),
 ]
+# SHA-256 файлов MediaPipe 0.10.14: сверены с хэшами jsDelivr и MD5 Google Storage (20.11.2026).
+# Файл с другим хэшем не сохраняется и не отдаётся в браузер: подмена на CDN не попадёт к врачу и пациенту.
+# Другая версия (MEDIAPIPE_VERSION) требует новых хэшей здесь.
+VENDOR_SHA256 = {
+    "vision_bundle.mjs": "e77f281f9619150d937023c355bae170e9120e3b9e43f1e23a2a7bee07197669",
+    "wasm/vision_wasm_internal.js": "9440cf0cc0cea21800e31581ec32aeedcc5fbf9df4509796bbc7d3f99e52ab9c",
+    "wasm/vision_wasm_internal.wasm": "f82a8e6c05e08a44cc9f9e7ec5f845935bcbb1b1500ebe8c2f4812fb4e2917dc",
+    "wasm/vision_wasm_nosimd_internal.js": "abe9b6fbeaf86fcb53a5edce3926c82ccb0619e18fed4d9d9ce561ee7f55e054",
+    "wasm/vision_wasm_nosimd_internal.wasm": "38b61feab2fd7934e05cbe9f68baa308978a5e3b7f85c1913bb8ae89b8ef8b97",
+    "face_landmarker.task": "64184e229b263107bc2b804c6625db1341ff2bb731874b0bcc2fe6544e0bc9ff",
+}
 
 log = logging.getLogger("mars")
 DB = None

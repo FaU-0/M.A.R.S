@@ -196,6 +196,8 @@ class HttpBase(BaseHTTPRequestHandler):
             return self.h_logout()
         if method == "GET" and path == "/auth/me":
             return self.h_me()
+        if method == "POST" and path == "/auth/password":
+            return self.h_password()
         if method == "POST" and path == "/doctors":
             return self.h_doctor_create()
         if path == "/appointments":
@@ -259,8 +261,8 @@ class HttpBase(BaseHTTPRequestHandler):
         if "\x00" in rel or ".." in rel.replace("\\", "/").split("/"):
             raise ApiError(404, "not_found", "Файл не найден")
         p = (vd / rel).resolve()
-        if vd not in p.parents or not p.is_file():
-            raise ApiError(404, "not_found", "Файл не найден")
+        if vd not in p.parents or not p.is_file() or not vendor_file_ok(rel):
+            raise ApiError(404, "not_found", "Файл не найден")  # только файлы MediaPipe из списка и с верным хэшем
         ctype = VENDOR_MIME.get(p.suffix.lower()) or mimetypes.guess_type(p.name)[0] or "application/octet-stream"
         self.reply(200, p.read_bytes(), ctype, {"Cache-Control": "public, max-age=86400"}, False)
 
@@ -274,12 +276,8 @@ class HttpBase(BaseHTTPRequestHandler):
         calc = hash_pw(pw, salt)
         if not row or not hmac.compare_digest(calc, row["pw"]):
             raise ApiError(401, "bad_credentials", "Неверный логин или пароль")
-        sid = secrets.token_urlsafe(32)
-        DB.run("sessions.add", (sid_hash(sid), row["id"], now() + SESSION_TTL))
+        cookie = new_session_cookie(row["id"])
         audit("doctor:%s" % row["login"], "login")
-        cookie = "mars_sid=%s; Path=/; HttpOnly; SameSite=Strict; Max-Age=%d" % (sid, SESSION_TTL)
-        if SECURE:
-            cookie += "; Secure"
         self.send_json(200, {"doctor": {"id": row["id"], "name": row["name"], "login": row["login"],
                                         "admin": bool(row["is_admin"])}}, {"Set-Cookie": cookie})
 
@@ -295,6 +293,32 @@ class HttpBase(BaseHTTPRequestHandler):
         cookie = "mars_sid=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0" + ("; Secure" if SECURE else "")
         self.send_json(200, {"status": "ok"}, {"Set-Cookie": cookie})
 
+    def h_password(self):
+        """Смена своего пароля: нужен текущий пароль. Все сессии врача закрываются, текущая выдаётся заново."""
+        ip_limit(self.client_address[0], "password", 8, 8 / 300.0)  # как у входа: перебор текущего пароля
+        doc = self.doctor()
+        if not doc.get("salt"):
+            raise ApiError(400, "no_password", "Вход по паролю отключён (AUTH_REQUIRED=0)")
+        b = self.read_json(65536)
+        old, new = str(b.get("old_password") or "")[:200], str(b.get("new_password") or "")
+        if not hmac.compare_digest(hash_pw(old, bytes(doc["salt"])), bytes(doc["pw"])):
+            audit(self.actor(doc), "password_change_failed")
+            raise ApiError(403, "bad_credentials", "Неверный текущий пароль")
+        if not PW_MIN <= len(new) <= PW_MAX:
+            raise ApiError(400, "bad_password", "Новый пароль: от %d до %d символов" % (PW_MIN, PW_MAX))
+        if hmac.compare_digest(new.encode("utf-8"), old.encode("utf-8")):
+            raise ApiError(400, "same_password", "Новый пароль совпадает с текущим")
+        salt = secrets.token_bytes(16)
+        DB.run("doctors.set_password", (salt, hash_pw(new, salt), doc["id"]))
+        DB.run("sessions.delete_for_doctor", (doc["id"],))  # украденная сессия перестаёт действовать
+        for key, hit in list(SESSION_SEEN.items()):
+            if hit[0] == doc["login"]:
+                SESSION_SEEN.pop(key, None)
+        if doc["login"] == "admin":
+            forget_admin_password_file()
+        audit(self.actor(doc), "password_changed")
+        self.send_json(200, {"status": "ok"}, {"Set-Cookie": new_session_cookie(doc["id"])})
+
     def h_me(self):
         doc = self.doctor(required=False)
         out = {"auth_required": AUTH_REQUIRED, "center": CENTER_NAME, "doctor": None}
@@ -308,8 +332,8 @@ class HttpBase(BaseHTTPRequestHandler):
             raise ApiError(403, "forbidden", "Только администратор")
         b = self.read_json(65536)
         login, name, pw = clean_text(b.get("login"), 60), clean_text(b.get("name"), 100), str(b.get("password") or "")
-        if not login or not name or len(pw) < 8:
-            raise ApiError(400, "bad_request", "Нужны логин, имя и пароль не короче 8 символов")
+        if not login or not name or not PW_MIN <= len(pw) <= PW_MAX:
+            raise ApiError(400, "bad_request", "Нужны логин, имя и пароль от %d до %d символов" % (PW_MIN, PW_MAX))
         if DB.one("doctors.id_by_login", (login,)):
             raise ApiError(409, "exists", "Логин занят")
         did = create_doctor(login, name, pw, 1 if b.get("admin") else 0)

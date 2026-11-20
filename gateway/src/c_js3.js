@@ -40,6 +40,7 @@ const Header = {
       list.append(item('user', T('Освободить место пациента'), async () => { try { await Api.ev('control', { action: 'reset_patient' }); Toast.show(T('Пациент сможет войти заново по ссылке')); } catch (e) { Toast.err(e); } }));
       list.append(item('alert', T('Экстренное завершение'), () => App.emergency(), true));
     }
+    if (Auth.doctor && Cfg.auth) list.append(item('user', T('Сменить пароль'), () => App.passwordSheet()));
     if (Auth.doctor && Cfg.auth) list.append(item('logout', T('Выйти'), () => Auth.logout()));
     s.el.append(list);
   }
@@ -589,6 +590,28 @@ const App = {
     $('#main').replaceChildren(h('div', { class: 'center-col' }, h('h2', { text: T('Сеанс недоступен') }),
       h('p', { class: 'mut', text: T('Комната не найдена или доступ к ней потерян (возможно, сервер перезапущен).') }),
       h('button', { class: 'btn pri', onclick: () => { try { sessionStorage.removeItem('mars_pt_' + Session.code); } catch (x) { /* ignore */ } location.reload(); } }, T('Начать заново'))));
+  },
+  passwordSheet() {
+    const cur = Ui.input('password'), nw = Ui.input('password'), rep = Ui.input('password');
+    cur.autocomplete = 'current-password'; nw.autocomplete = 'new-password'; rep.autocomplete = 'new-password';
+    nw.minLength = 8; nw.maxLength = 200; rep.maxLength = 200;
+    const err = h('p', { class: 'mut', role: 'alert', style: 'margin:0;color:var(--badt)' });
+    const s = Ui.sheet({
+      title: T('Сменить пароль'),
+      actions: [{ label: T('Отмена'), kind: 'sec' }, {
+        label: T('Сохранить'), kind: 'pri', keep: true, onClick: async api => {
+          err.textContent = '';
+          if (nw.value.length < 8) { err.textContent = T('Новый пароль не короче 8 символов'); nw.focus(); return; }
+          if (nw.value !== rep.value) { err.textContent = T('Пароли не совпадают'); rep.focus(); return; }
+          try {
+            await Api.post('/auth/password', { old_password: cur.value, new_password: nw.value }, { token: false });
+            api.close();
+            Toast.show(T('Пароль изменён. На других устройствах нужно войти заново'));
+          } catch (e) { err.textContent = (e && e.message) || T('Ошибка'); }
+        }
+      }]
+    });
+    s.el.append(Ui.field(T('Текущий пароль'), cur), Ui.field(T('Новый пароль'), nw), Ui.field(T('Повторите новый пароль'), rep), err);
   },
   async auditSheet() {
     const s = Ui.sheet({ title: T('Журнал аудита'), wide: true });

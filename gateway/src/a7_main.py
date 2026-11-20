@@ -51,7 +51,6 @@ def main():
         print("Сервис database не отвечает: gateway не запущен")
         return
     bootstrap_admin()
-    ensure_vendor()
     stop_evt = threading.Event()
     try:
         httpd = Srv(("0.0.0.0", PORT), Handler)
@@ -66,6 +65,8 @@ def main():
         httpd.socket = ctx.wrap_socket(httpd.socket, server_side=True, do_handshake_on_connect=False)
     rt = Runtime(httpd, DB, stop_evt, COND)
     _MARS_RUNNING = rt
+    # MediaPipe скачивается в фоне: звонок доступен сразу, Face Mesh включается, когда файлы прошли проверку SHA-256
+    threading.Thread(target=ensure_vendor, name="vendor", daemon=True).start()
     threading.Thread(target=cleanup_loop, args=(stop_evt,), daemon=True).start()
     for svc in JOB_SERVICES:
         threading.Thread(target=jobs_loop, args=(stop_evt, svc), daemon=True).start()

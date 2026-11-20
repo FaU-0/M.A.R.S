@@ -18,6 +18,7 @@ QUERIES = {
     "doctors.id_by_login": ("one", "SELECT id FROM doctors WHERE login=?"),
     "doctors.name": ("one", "SELECT name FROM doctors WHERE id=?"),
     "doctors.set_admin_password": ("run", "UPDATE doctors SET salt=?, pw=?, is_admin=1 WHERE id=?"),
+    "doctors.set_password": ("run", "UPDATE doctors SET salt=?, pw=? WHERE id=?"),
     "sessions.add": ("run", "INSERT INTO sessions(sid,doctor_id,expires) VALUES(?,?,?)"),
     "sessions.doctor": ("one", "SELECT d.* FROM sessions s JOIN doctors d ON d.id=s.doctor_id WHERE s.sid=? AND s.expires>?"),
     "sessions.delete": ("run", "DELETE FROM sessions WHERE sid=?"),
