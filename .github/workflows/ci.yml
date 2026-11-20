@@ -39,7 +39,7 @@ jobs:
       - name: Тесты
         run: |
           fail=0
-          for t in test_gigachat test_i18n test_fhir test_repeat test_access test_audit_quota test_database \
+          for t in test_gigachat test_i18n test_fhir test_repeat test_report_marks test_access test_audit_quota test_database \
                    test_password_vendor test_reports test_consent test_vision; do
             echo "::group::$t"
             python tests/$t.py || { fail=1; echo "::error::$t не прошёл"; }

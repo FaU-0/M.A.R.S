@@ -2,6 +2,18 @@
 /* ===== Face Mesh: управление, панели, съёмка, сравнение, отчёт ===== */
 const SIGN_SYM = T('Числа для документирования, не диагноз');
 const SIGN_MOB = T('Наблюдение для врача, не оценка по клинической шкале');
+/* Порог «в пределах погрешности» для симметрии: ≈ 2 SD смещения нуля между людьми на симметричном цифровом фантоме
+   (metrology/REPORT.md). Доли МЗР (мм / 63), наклон линии глаз — в градусах. */
+const SYM_NOISE = { eo: 0.7 / 63, ei: 0.5 / 63, mouth: 2.2 / 63, brow: 0.9 / 63, mcor: 0.7 / 63, half: 0.9 / 63, nose: 0.9 / 63, chin: 1.8 / 63, tilt: 0.5 };
+const inNoise = (id, v) => v != null && isFinite(v) && SYM_NOISE[id] != null && Math.abs(v) < SYM_NOISE[id];
+/* Индекс асимметрии подвижности: среднее (1 − соотношение сторон) по бровям, улыбке и закрытию глаз.
+   На наборе MEEI (metrology/REPORT.md) у здоровых не выше 0,27; ориентир, не порог диагноза. */
+const MOB_INDEX_TASKS = ['brow', 'smile', 'eye'];
+const MOB_INDEX_NORMAL_MAX = 0.27;
+const mobIndex = p => {
+  const v = (p.tasks || []).filter(t => MOB_INDEX_TASKS.includes(t.id) && t.ratio != null).map(t => 1 - t.ratio);
+  return v.length === MOB_INDEX_TASKS.length ? v.reduce((a, b) => a + b, 0) / v.length : null;
+};
 const fx = (v, n) => (v == null || !isFinite(v)) ? '-' : (v >= 0 ? '' : '−') + Math.abs(v).toFixed(n == null ? 3 : n);
 
 Object.assign(FaceMesh, {
@@ -194,8 +206,9 @@ Object.assign(FaceMesh, {
     const src = (k ? T(' Источник масштаба: ') + T(p.calibration.label) + '.' : T(' Калибровки нет: значения в мм не показываются.')) + (p.source === 'device' ? T(' Рассчитано на устройстве.') : p.source === 'vision' ? T(' Рассчитано сервисом анализа.') : '');
     return h('div', { class: 'stack' },
       h('table', { class: 'tb' }, h('tr', null, h('th', { text: T('Метрика') + unit }), h('th', { class: 'n', text: T('Правая') }), h('th', { class: 'n', text: T('Левая') }), h('th', { class: 'n', text: T('Разность') })),
-        rows.map(r => h('tr', null, h('td', { text: T(r.label) }), h('td', { class: 'n', text: fx(r.right) + (k ? ' / ' + fx(r.right_mm, 1) : '') }), h('td', { class: 'n', text: fx(r.left) + (k ? ' / ' + fx(r.left_mm, 1) : '') }), h('td', { class: 'n', text: fx(r.diff) + (k ? ' / ' + fx(r.diff_mm, 1) : '') })))),
-      h('table', { class: 'tb' }, (p.singles || []).map(s => h('tr', null, h('td', { text: T(s.label) }), h('td', { class: 'n', text: s.unit === 'deg' ? fx(s.value, 1) + '°' : fx(s.value) + (k && s.value_mm != null ? ' / ' + fx(s.value_mm, 1) + T(' мм') : '') })))),
+        rows.map(r => h('tr', null, h('td', { text: T(r.label) }), h('td', { class: 'n', text: fx(r.right) + (k ? ' / ' + fx(r.right_mm, 1) : '') }), h('td', { class: 'n', text: fx(r.left) + (k ? ' / ' + fx(r.left_mm, 1) : '') }), h('td', { class: 'n', text: fx(r.diff) + (k ? ' / ' + fx(r.diff_mm, 1) : '') + (inNoise(r.id, r.diff) ? ' †' : '') })))),
+      h('table', { class: 'tb' }, (p.singles || []).map(s => h('tr', null, h('td', { text: T(s.label) }), h('td', { class: 'n', text: (s.unit === 'deg' ? fx(s.value, 1) + '°' : fx(s.value) + (k && s.value_mm != null ? ' / ' + fx(s.value_mm, 1) + T(' мм') : '')) + (inNoise(s.id, s.value) ? ' †' : '') })))),
+      h('p', { class: 'note', style: 'margin:0', text: T('† — в пределах погрешности системы: на идеально симметричном лице M.A.R.S. показывает разность такого же размера (цифровой фантом, ориентировочно).') }),
       h('p', { class: 'note', style: 'margin:0', text: T('МЗР: межзрачковое расстояние. Положительное значение смещения: в сторону левой половины лица пациента. Кадров в выборке: ') + (p.samples || 0) + '.' + src }),
       h('p', { class: 'note', style: 'margin:0;font-weight:600', text: SIGN_SYM }));
   },
@@ -211,11 +224,19 @@ Object.assign(FaceMesh, {
     const hint = k ? null : h('p', { class: 'note', style: 'margin:0', text: T('Без калибровки значения даны в долях межзрачкового расстояния (МЗР): 0,100 — одна десятая расстояния между зрачками этого пациента. Так значения сравнимы между приёмами, даже если пациент сидел дальше или ближе к камере. Чтобы видеть миллиметры, запросите калибровку.') });
     return h('div', { class: 'stack' }, hint, h('div', { class: 'doses' }, (p.rows || []).map(r => this.doseCard(T(r.label),
       f(k ? r.right_mm : r.right), f(k ? r.left_mm : r.left), k ? T('мм') : T('МЗР'),
-      T('Разность (правая − левая): ') + f(k ? r.diff_mm : r.diff) + (k ? T(' мм') : '')))));
+      T('Разность (правая − левая): ') + f(k ? r.diff_mm : r.diff) + (k ? T(' мм') : '') + (inNoise(r.id, r.diff) ? T(' — в пределах погрешности системы') : '')))));
+  },
+  mobIndexCard(p) {
+    const v = mobIndex(p);
+    if (v == null) return null;
+    const f = x => fx(x, 2).replace('.', DEC);
+    return h('div', { class: 'dose', role: 'group', 'aria-label': T('Индекс асимметрии подвижности') },
+      h('h4', { text: T('Индекс асимметрии подвижности') }), h('div', { class: 'sd one' }, h('span', { class: 'n', text: f(v) })),
+      h('div', { class: 'df', text: T('Брови, улыбка и закрытие глаз: 0 — стороны двигаются одинаково, 1 — одна сторона неподвижна. У здоровых в наборе MEEI — не выше ') + f(MOB_INDEX_NORMAL_MAX) + T('. Ориентир, не диагноз.') }));
   },
   mobDoses(p) {
     const f = v => fx(v, 2).replace('.', DEC);
-    return h('div', { class: 'doses' }, (p.tasks || []).map(t => t.single != null
+    return h('div', { class: 'doses' }, this.mobIndexCard(p), (p.tasks || []).map(t => t.single != null
       ? h('div', { class: 'dose', role: 'group', 'aria-label': T(t.label) }, h('h4', { text: T(t.label) }), h('div', { class: 'df', text: T('Обе стороны вместе (модель не разделяет): ') + f(t.single) }))
       : this.doseCard(T(t.label), f(t.right), f(t.left), '', T('Соотношение сторон: ') + (t.ratio == null ? '-' : f(t.ratio)) + T(' (1 — одинаково)'))));
   },
@@ -224,7 +245,9 @@ Object.assign(FaceMesh, {
     return h('div', { class: 'stack' },
       h('table', { class: 'tb' }, h('tr', null, h('th', { text: T('Задание (максимум коэффициента 0-1)') }), h('th', { class: 'n', text: T('Правая') }), h('th', { class: 'n', text: T('Левая') }), h('th', { class: 'n', text: T('Соотношение') })),
         (p.tasks || []).map(t => t.single != null ? h('tr', null, h('td', { text: T(t.label) + T(' (обе стороны, модель не разделяет)') }), h('td', { class: 'n', text: fx(t.single, 2) }), h('td', { class: 'n', text: '-' }), h('td', { class: 'n', text: '-' }))
-          : h('tr', null, h('td', { text: T(t.label) }), h('td', { class: 'n', text: fx(t.right, 2) }), h('td', { class: 'n', text: fx(t.left, 2) }), h('td', { class: 'n', text: t.ratio == null ? '-' : fx(t.ratio, 2) })))),
+          : h('tr', null, h('td', { text: T(t.label) }), h('td', { class: 'n', text: fx(t.right, 2) }), h('td', { class: 'n', text: fx(t.left, 2) }), h('td', { class: 'n', text: t.ratio == null ? '-' : fx(t.ratio, 2) }))),
+        mobIndex(p) == null ? null : h('tr', null, h('td', { text: T('Индекс асимметрии подвижности (брови, улыбка, глаза)') }), h('td', { class: 'n', text: '' }), h('td', { class: 'n', text: '' }), h('td', { class: 'n', text: fx(mobIndex(p), 2) }))),
+      h('p', { class: 'note', style: 'margin:0', text: T('Индекс асимметрии подвижности: среднее (1 − соотношение) по бровям, улыбке и закрытию глаз; у здоровых в наборе MEEI не выше 0,27.') }),
       h('p', { class: 'note', style: 'margin:0;font-weight:600', text: SIGN_MOB }));
   },
   async sendResult(payload) {

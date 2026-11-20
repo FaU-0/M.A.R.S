@@ -344,7 +344,7 @@ FaceMesh.Mobility = {
   TASKS: [
     { id: 'smile', label: T('Улыбка'), cmd: T('Широко улыбнитесь и держите улыбку'), r: 'mouthSmileRight', l: 'mouthSmileLeft' },
     { id: 'brow', label: T('Подъём бровей'), cmd: T('Поднимите брови как можно выше'), r: 'browOuterUpRight', l: 'browOuterUpLeft' },
-    { id: 'eye', label: T('Закрытие глаз'), cmd: T('Крепко зажмурьте глаза'), r: 'eyeBlinkRight', l: 'eyeBlinkLeft' },
+    { id: 'eye', label: T('Закрытие глаз'), cmd: T('Мягко закройте глаза, не зажмуриваясь'), r: 'eyeBlinkRight', l: 'eyeBlinkLeft' },
     { id: 'cheek', label: T('Надувание щёк'), cmd: T('Надуйте щёки и держите'), single: 'cheekPuff' },
     { id: 'mouth', label: T('Открытие рта'), cmd: T('Широко откройте рот'), single: 'jawOpen' },
     { id: 'lips', label: T('Поджатие губ'), cmd: T('Плотно сожмите губы'), r: 'mouthPressRight', l: 'mouthPressLeft' }
