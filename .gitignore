@@ -11,3 +11,8 @@ speech/.venv/
 # Python 3.14t (free-threaded), скачан локально для расшифровки в потоках
 .python314t/
 .python314t_dl/
+
+# окружение vision с MediaPipe для Python (метрология, vision/detector.py)
+vision/.venv/
+# открытые наборы с лицами пациентов: только локально, не распространять
+datasets/

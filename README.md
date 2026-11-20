@@ -112,6 +112,16 @@ python run_all.py --only gateway,reports
 
 Файлы MediaPipe скачиваются автоматически в `DATA_DIR/vendor`, в фоне: сервер принимает запросы сразу. У каждого файла записан SHA-256 (`VENDOR_SHA256` в `gateway/src/a1_core.py`): файл с другим хэшем не сохраняется, лежащий на диске подменённый файл удаляется, и в браузер отдаются только проверенные файлы из списка. Если сети нет, в консоли будет список файлов с адресами: положите их вручную. Без этих файлов модуль Face Mesh отключается, а видеозвонок работает.
 
+### Запуск в Docker
+
+```
+docker compose up -d --build
+docker compose exec ollama ollama pull qwen2.5:3b
+docker compose logs mars | grep "Вход администратора"
+```
+
+`docker-compose.yml` поднимает два контейнера: `mars` (все шесть сервисов через `run_all.py`, наружу открыт только порт 8000) и `ollama` (локальная нейросеть обезличивания). Данные пациентов, модели Whisper и модель Ollama лежат в томах и переживают пересборку. Контейнер работает от непривилегированного пользователя. `docker build --build-arg WITH_MEDIAPIPE=1` добавляет MediaPipe для Python (поиск точек лица на сервере). Для других компьютеров сети нужен https: задайте `CERT_FILE` и `KEY_FILE` (закомментированные строки в `docker-compose.yml`).
+
 ### Запуск в Jupyter
 Выполните `gateway/mars.py` в ячейке: сервер запустится в фоновом потоке. Повторный запуск ячейки останавливает предыдущий экземпляр. Вторичные сервисы в Jupyter запускаются отдельно через `run_all.py`.
 
@@ -269,6 +279,8 @@ python tests/eval_deid.py         только оценка обезличива
 python tests/test_gigachat.py     клиент GigaChat без сети: токен, повторы, отказы, выбор LLM_BACKEND, падежные формы
 python tests/test_password_vendor.py  смена пароля, перебор, пароль администратора после перезапуска; SHA-256 файлов MediaPipe
 ```
+
+На каждый push GitHub Actions (`.github/workflows/ci.yml`) проверяет, что `gateway/mars.py` собран из текущих исходников, синтаксис Python, прогоняет 11 наборов тестов без тяжёлых моделей, собирает Docker-образ и проверяет, что контейнер отвечает и пускает администратора. Тесты с Whisper и Ollama (`test_speech`, `test_assistant`, `test_failover`, `test_parallel`, `test_resilience`) запускаются локально.
 
 Тесты используют порты 18000 и выше и временную папку данных, рабочие данные не затрагиваются. `test_speech`, `test_assistant` и `test_failover` используют `speech/.venv` и Ollama; модели Whisper берутся из `~/.cache/mars_models`. `test_assistant.py --quick` пропускает оценку на диалогах (она занимает около 20 минут).
 

@@ -1,0 +1,18 @@
+# данные пациентов и локальные окружения в образ не попадают
+mars_data/
+**/.venv/
+**/.venv314t/
+.python314t/
+.python314t_dl/
+**/__pycache__/
+*.pyc
+*.jsonl
+.git/
+.github/
+.claude/
+.impeccable/
+.DS_Store
+loadtest/results*/
+loadtest/audio/
+datasets/
+metrology/data/

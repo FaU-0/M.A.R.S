@@ -1,0 +1,77 @@
+# Проверка на каждый push и pull request: тесты без тяжёлых моделей, сборка клиента, Docker-образ.
+# Тесты с Whisper и Ollama (test_speech, test_assistant, test_failover, test_parallel, test_resilience)
+# идут локально: моделям нужны гигабайты и минуты загрузки.
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  tests:
+    name: Тесты
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+
+      - name: gateway/mars.py собран из текущих исходников
+        run: |
+          bash gateway/build.sh
+          git diff --exit-code gateway/mars.py || { echo "::error::Запустите bash gateway/build.sh и закоммитьте gateway/mars.py"; exit 1; }
+
+      - name: Синтаксис Python
+        run: python -m compileall -q assistant database gateway reports shared speech vision tests loadtest run_all.py
+
+      - name: Тесты
+        run: |
+          fail=0
+          for t in test_gigachat test_i18n test_fhir test_repeat test_access test_audit_quota test_database \
+                   test_password_vendor test_reports test_consent test_vision; do
+            echo "::group::$t"
+            python tests/$t.py || { fail=1; echo "::error::$t не прошёл"; }
+            echo "::endgroup::"
+          done
+          exit $fail
+
+  docker:
+    name: Docker-образ
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Сборка
+        run: docker build -t mars:ci .
+
+      - name: Контейнер запускается и отвечает
+        run: |
+          docker run -d --name mars -p 8000:8000 -e ADMIN_PASSWORD=ci-admin-pass mars:ci
+          for i in $(seq 1 60); do
+            if curl -fsS http://127.0.0.1:8000/health; then echo; exit 0; fi
+            sleep 2
+          done
+          docker logs mars
+          exit 1
+
+      - name: Вход администратора
+        run: |
+          curl -fsS -X POST http://127.0.0.1:8000/auth/login -H 'Content-Type: application/json' \
+               -d '{"login":"admin","password":"ci-admin-pass"}'
+
+      - name: Журнал контейнера
+        if: always()
+        run: docker logs mars 2>&1 | tail -50

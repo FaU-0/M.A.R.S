@@ -1,0 +1,39 @@
+# M.A.R.S. в локальной сети клиники: приложение + локальная нейросеть Ollama.
+#
+#   docker compose up -d --build
+#   docker compose exec ollama ollama pull qwen2.5:3b     # один раз: модель обезличивания
+#   docker compose logs mars | grep "Вход администратора"  # логин и пароль администратора
+#
+# Камера и микрофон в браузере работают только по https или на localhost:
+# для других компьютеров сети задайте CERT_FILE и KEY_FILE (сертификат в томе ./certs).
+services:
+  mars:
+    build: .
+    image: mars:latest
+    ports:
+      - "8000:8000"
+    environment:
+      OLLAMA_URL: http://ollama:11434
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen2.5:3b}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
+      CENTER_NAME: ${CENTER_NAME:-Медицинский центр}
+      # CERT_FILE: /certs/cert.pem
+      # KEY_FILE: /certs/key.pem
+    volumes:
+      - mars-data:/data
+      - mars-models:/models
+      # - ./certs:/certs:ro
+    depends_on:
+      - ollama
+    restart: unless-stopped
+
+  ollama:
+    image: ollama/ollama:0.40.10  # та же версия, на которой сделаны замеры (loadtest/LLM_REPORT.md)
+    volumes:
+      - ollama:/root/.ollama
+    restart: unless-stopped
+
+volumes:
+  mars-data:
+  mars-models:
+  ollama:
