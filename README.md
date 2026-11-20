@@ -162,6 +162,11 @@ CERT_FILE=cert.pem KEY_FILE=key.pem python run_all.py
 | `MODELS_DIR` | `DATA_DIR/models` | Куда скачиваются модели Whisper |
 | `OLLAMA_URL` | `http://127.0.0.1:11434` | Адрес Ollama для `assistant` |
 | `OLLAMA_MODEL` | `qwen2.5:3b` | Модель Ollama для обезличивания |
+| `LLM_BACKEND` | `ollama` | Нейросеть обезличивания: `ollama` (локально) или `gigachat` (облако Сбера, только для экспериментов на синтетических данных: в облако уходит текст, где имена ещё не скрыты) |
+| `GIGACHAT_AUTH_KEY` | — | Ключ авторизации GigaChat API (Authorization key). Хранить вне репозитория |
+| `GIGACHAT_MODEL` | `GigaChat-2-Max` | Модель GigaChat |
+| `GIGACHAT_CA_FILE` | — | Корневой сертификат НУЦ Минцифры (без него Python не доверяет серверу GigaChat) |
+| `GIGACHAT_SCOPE` | `GIGACHAT_API_PERS` | Версия API: физлица; `GIGACHAT_API_B2B`, `GIGACHAT_API_CORP` — юрлица |
 | `TRANSCRIPT_DAYS` | `30` | Срок хранения исходной расшифровки, дней |
 | `FACE_MODEL` | `DATA_DIR/models/face_landmarker.task` | Модель MediaPipe для `vision`, если установлен MediaPipe для Python |
 | `BACKUP_DIR` | `DATA_DIR/backups` | Куда `database` кладёт резервные копии базы |
@@ -259,6 +264,7 @@ python tests/test_repeat.py       проверка повторяемости: �
 python tests/test_fhir.py         экспорт отчёта в HL7 FHIR R4: структура, единицы UCUM, ссылки
 python tests/test_i18n.py         английская версия: у каждой строки T('...') есть перевод
 python tests/eval_deid.py         только оценка обезличивания (по умолчанию модель OLLAMA_MODEL)
+python tests/test_gigachat.py     клиент GigaChat без сети: токен, повторы, отказы, выбор LLM_BACKEND, падежные формы
 ```
 
 Тесты используют порты 18000 и выше и временную папку данных, рабочие данные не затрагиваются. `test_speech`, `test_assistant` и `test_failover` используют `speech/.venv` и Ollama; модели Whisper берутся из `~/.cache/mars_models`. `test_assistant.py --quick` пропускает оценку на диалогах (она занимает около 20 минут).
@@ -290,7 +296,7 @@ gateway/
 vision/          метрики лица (metrics.py), поиск точек при наличии MediaPipe (detector.py)
 reports/         печатные формы
 speech/          Whisper; requirements.txt для своего окружения .venv
-assistant/       обезличивание: правила (deid.py) и Ollama (main.py)
+assistant/       обезличивание: правила (deid.py), Ollama или GigaChat (main.py, gigachat.py)
 database/        SQLite: схема и миграции (schema.py), все запросы (queries.py), хранилище (store.py), сервис (main.py)
 shared/          настройки, подпись запросов, клиент вызова, выключатель, формат ошибок, каркас сервиса
 contracts/       схемы запросов и ответов сервисов (будут добавлены)

@@ -96,6 +96,8 @@ class Client:
 # ---------------- стенд ----------------
 def start_stack(data_dir, env_extra):
     env = dict(os.environ, DATA_DIR=str(data_dir), PORT=str(BASE), ADMIN_PASSWORD=ADMIN_PW)
+    # модели Whisper из общего кэша, как в тестах: иначе каждый стенд скачивает ~500 МБ во временную папку
+    env.setdefault("MODELS_DIR", str(Path.home() / ".cache" / "mars_models"))
     for i, n in enumerate(SERVICES, 1):
         env["MARS_%s_PORT" % n.upper()] = str(BASE + i)
     env.update(env_extra)
@@ -108,6 +110,11 @@ def start_stack(data_dir, env_extra):
         s, st = c.call("GET", "/status", record=False, timeout=5)
         if s == 200 and isinstance(st, dict) and st.get("status") == "ok" and st.get("services"):
             return p, round(time.time() - t, 1)
+    p.terminate()  # иначе стенд остаётся висеть на портах 18000+ и мешает следующему прогону
+    try:
+        p.wait(timeout=30)
+    except subprocess.TimeoutExpired:
+        p.kill()
     raise SystemExit("стенд не поднялся за 240 с, см. %s" % (data_dir / "run_all.log"))
 
 
@@ -347,6 +354,8 @@ def main():
     ap.add_argument("--speech-workers", default="", help="SPEECH_WORKERS: сколько пар расшифровывается одновременно")
     ap.add_argument("--speech-venv", default="", help="окружение speech: .venv (по умолчанию) или .venv314t (Python 3.14t)")
     ap.add_argument("--nogil", action="store_true", help="для .venv314t: PYTHON_GIL=0, чтобы PyAV не включал GIL")
+    ap.add_argument("--llm", choices=("ollama", "gigachat"), default="ollama",
+                    help="нейросеть обезличивания: ollama (локально) или gigachat (облако, ключ в GIGACHAT_AUTH_KEY)")
     ap.add_argument("--out", default=str(LT / "results"))
     a = ap.parse_args()
     out = Path(a.out)
@@ -365,6 +374,7 @@ def main():
         env["SPEECH_VENV"] = a.speech_venv
     if a.nogil:
         env["SPEECH_NOGIL"] = "1"
+    env["LLM_BACKEND"] = a.llm
     stack, boot_s = start_stack(data_dir, env)
     stop = threading.Event()
     res_rows, q_rows = [], []
@@ -414,7 +424,7 @@ def main():
         meta = {"duration_s": a.duration, "drain_s": a.drain, "boot_s": boot_s, "doctors": MAX_DOCTORS, "data_dir": str(data_dir),
                 "cpu_count": psutil.cpu_count(), "cpu_count_physical": psutil.cpu_count(logical=False),
                 "ram_gb": round(psutil.virtual_memory().total / 2 ** 30, 1), "whisper_threads": a.whisper_threads or "auto",
-                "speech_workers": a.speech_workers or "2 (по умолчанию)", "speech_venv": a.speech_venv or ".venv", "nogil": a.nogil, "steps": steps}
+                "speech_workers": a.speech_workers or "2 (по умолчанию)", "speech_venv": a.speech_venv or ".venv", "nogil": a.nogil, "llm": a.llm, "steps": steps}
         (out / "steps.json").write_text(json.dumps(meta, ensure_ascii=False, indent=1), encoding="utf-8")
         stack.terminate()
         try:

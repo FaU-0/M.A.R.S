@@ -190,7 +190,7 @@ def rule_spans(text):
 
 
 def clean_llm(items, text):
-    """Ответ модели: оставить только короткие фрагменты, которые есть в тексте дословно."""
+    """Ответ модели: оставить только короткие фрагменты, которые есть в тексте (дословно или в другой падежной форме)."""
     out, low = [], text.lower()
     for it in items or []:
         if not isinstance(it, dict):
@@ -199,7 +199,12 @@ def clean_llm(items, text):
         if typ not in NUMBERED or not frag or len(frag) > 60 or len(frag.split()) > 5:
             continue
         if frag.lower() not in low:
-            continue  # модель придумала или переписала фрагмент
+            # модель поставила слово в начальную форму («Кинешма» при «из Кинешмы»): берём форму из текста
+            rx = variant_re(frag)
+            m = rx.search(text) if rx is not None else None
+            if not m:
+                continue  # модель придумала или переписала фрагмент
+            frag = m.group(0).strip(" .,;:!?")
         if "[" in frag or not re.search(r"[А-ЯЁA-Z«\"\d]", frag):
             continue  # имена, места и названия пишутся с заглавной, в кавычках или с номером; «анализ крови» - нет
         words = [w for w in re.findall(r"\w+", frag.lower())]

@@ -1,0 +1,241 @@
+{
+ "duration_s": 60.0,
+ "drain_s": 900.0,
+ "boot_s": 8.8,
+ "doctors": 8,
+ "data_dir": "/var/folders/p5/rrs1wg7x78vfw3091mbq3zlw0000gn/T/mars_load_53q89kux",
+ "cpu_count": 8,
+ "cpu_count_physical": 4,
+ "ram_gb": 8.0,
+ "whisper_threads": "auto",
+ "speech_workers": "2 (по умолчанию)",
+ "speech_venv": ".venv",
+ "nogil": false,
+ "llm": "gigachat",
+ "steps": [
+  {
+   "step": 1,
+   "pairs": 1,
+   "t_start": 1795135625.394739,
+   "t_load_end": 1795135690.570393,
+   "t_end": 1795135696.586129,
+   "pending_after_drain": 0,
+   "infos": [
+    {
+     "pair": 0,
+     "appt": 2,
+     "code": "TF74AR",
+     "analyze_s": 1.41,
+     "analyze_status": "done",
+     "ended": 1795135690.548,
+     "chunks": {
+      "doctor": 6,
+      "patient": 6
+     }
+    }
+   ],
+   "errors": []
+  },
+  {
+   "step": 2,
+   "pairs": 2,
+   "t_start": 1795135696.588058,
+   "t_load_end": 1795135766.594667,
+   "t_end": 1795135774.623952,
+   "pending_after_drain": 0,
+   "infos": [
+    {
+     "pair": 0,
+     "appt": 3,
+     "code": "YNB6GN",
+     "analyze_s": 1.39,
+     "analyze_status": "done",
+     "ended": 1795135759.078,
+     "chunks": {
+      "doctor": 6,
+      "patient": 6
+     }
+    },
+    {
+     "pair": 1,
+     "appt": 4,
+     "code": "GQ223J",
+     "analyze_s": 1.28,
+     "analyze_status": "done",
+     "ended": 1795135766.588,
+     "chunks": {
+      "doctor": 6,
+      "patient": 6
+     }
+    }
+   ],
+   "errors": []
+  },
+  {
+   "step": 4,
+   "pairs": 4,
+   "t_start": 1795135774.625619,
+   "t_load_end": 1795135843.103141,
+   "t_end": 1795136021.795027,
+   "pending_after_drain": 0,
+   "infos": [
+    {
+     "pair": 0,
+     "appt": 6,
+     "code": "HN6TCY",
+     "analyze_s": 1.48,
+     "analyze_status": "done",
+     "ended": 1795135835.984,
+     "chunks": {
+      "doctor": 6,
+      "patient": 6
+     }
+    },
+    {
+     "pair": 1,
+     "appt": 8,
+     "code": "3NQZBA",
+     "analyze_s": 1.48,
+     "analyze_status": "done",
+     "ended": 1795135843.089,
+     "chunks": {
+      "doctor": 6,
+      "patient": 6
+     }
+    },
+    {
+     "pair": 2,
+     "appt": 7,
+     "code": "25MYXW",
+     "analyze_s": 1.45,
+     "analyze_status": "done",
+     "ended": 1795135840.585,
+     "chunks": {
+      "doctor": 6,
+      "patient": 6
+     }
+    },
+    {
+     "pair": 3,
+     "appt": 5,
+     "code": "VT5UD8",
+     "analyze_s": 1.59,
+     "analyze_status": "done",
+     "ended": 1795135835.731,
+     "chunks": {
+      "doctor": 6,
+      "patient": 6
+     }
+    }
+   ],
+   "errors": []
+  },
+  {
+   "step": 8,
+   "pairs": 8,
+   "t_start": 1795136021.7973871,
+   "t_load_end": 1795136094.6421099,
+   "t_end": 1795136241.1187441,
+   "pending_after_drain": 0,
+   "infos": [
+    {
+     "pair": 0,
+     "appt": 15,
+     "code": "PRKUFM",
+     "analyze_s": 1.44,
+     "analyze_status": "done",
+     "ended": 1795136089.783,
+     "chunks": {
+      "doctor": 6,
+      "patient": 6
+     }
+    },
+    {
+     "pair": 1,
+     "appt": 9,
+     "code": "27KX8D",
+     "analyze_s": 1.75,
+     "analyze_status": "done",
+     "ended": 1795136082.59,
+     "chunks": {
+      "doctor": 6,
+      "patient": 6
+     }
+    },
+    {
+     "pair": 2,
+     "appt": 14,
+     "code": "4MMGZY",
+     "analyze_s": 1.44,
+     "analyze_status": "done",
+     "ended": 1795136088.96,
+     "chunks": {
+      "doctor": 6,
+      "patient": 6
+     }
+    },
+    {
+     "pair": 3,
+     "appt": 10,
+     "code": "X7KKNB",
+     "analyze_s": 1.62,
+     "analyze_status": "done",
+     "ended": 1795136083.128,
+     "chunks": {
+      "doctor": 6,
+      "patient": 6
+     }
+    },
+    {
+     "pair": 4,
+     "appt": 11,
+     "code": "AQPQLY",
+     "analyze_s": 1.41,
+     "analyze_status": "done",
+     "ended": 1795136083.494,
+     "chunks": {
+      "doctor": 6,
+      "patient": 6
+     }
+    },
+    {
+     "pair": 5,
+     "appt": 13,
+     "code": "9GWHVC",
+     "analyze_s": 1.47,
+     "analyze_status": "done",
+     "ended": 1795136088.751,
+     "chunks": {
+      "doctor": 6,
+      "patient": 6
+     }
+    },
+    {
+     "pair": 6,
+     "appt": 16,
+     "code": "8R3RVY",
+     "analyze_s": 1.47,
+     "analyze_status": "done",
+     "ended": 1795136094.604,
+     "chunks": {
+      "doctor": 6,
+      "patient": 6
+     }
+    },
+    {
+     "pair": 7,
+     "appt": 12,
+     "code": "PTHES3",
+     "analyze_s": 1.41,
+     "analyze_status": "done",
+     "ended": 1795136084.103,
+     "chunks": {
+      "doctor": 6,
+      "patient": 6
+     }
+    }
+   ],
+   "errors": []
+  }
+ ]
+}
