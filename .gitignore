@@ -16,3 +16,6 @@ speech/.venv/
 vision/.venv/
 # открытые наборы с лицами пациентов: только локально, не распространять
 datasets/
+.env
+certs/
+.venv/

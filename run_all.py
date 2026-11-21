@@ -34,11 +34,18 @@ def base_python(env):
     return str(PY314T) if PY314T.exists() else sys.executable
 
 
+def _venv_python(venv_dir: Path) -> Path:
+    """Путь к python внутри venv для текущей ОС."""
+    if os.name == "nt":
+        return venv_dir / "Scripts" / "python.exe"
+    return venv_dir / "bin" / "python"
+
+
 def speech_venv(env, base):
     """Окружение speech: явно заданное, иначе .venv314t вместе с Python 3.14t, иначе прежнее .venv."""
     if env.get("SPEECH_VENV"):
         return env["SPEECH_VENV"]
-    return ".venv314t" if base == str(PY314T) and (ROOT / "speech" / ".venv314t" / "bin" / "python").exists() else ".venv"
+    return ".venv314t" if base == str(PY314T) and _venv_python(ROOT / "speech" / ".venv314t").exists() else ".venv"
 
 
 def main():
@@ -71,7 +78,7 @@ def main():
         if n == "gateway":
             return [base, str(ROOT / "gateway" / "mars.py")]
         # у тяжёлого сервиса может быть своё окружение (speech: faster-whisper)
-        venv = ROOT / n / (sp_venv if n == "speech" else ".venv") / "bin" / "python"
+        venv = _venv_python(ROOT / n / (sp_venv if n == "speech" else ".venv"))
         return [str(venv) if venv.exists() else base, "-m", n + ".main"]
 
     procs = {}

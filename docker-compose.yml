@@ -15,6 +15,11 @@ services:
     environment:
       OLLAMA_URL: http://ollama:11434
       OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen2.5:3b}
+      LLM_BACKEND: ${LLM_BACKEND:-ollama}
+      GIGACHAT_AUTH_KEY: ${GIGACHAT_AUTH_KEY:-}
+      GIGACHAT_MODEL: ${GIGACHAT_MODEL:-GigaChat-2-Max}
+      GIGACHAT_SCOPE: ${GIGACHAT_SCOPE:-GIGACHAT_API_PERS}
+      GIGACHAT_CA_FILE: ${GIGACHAT_CA_FILE:-}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
       CENTER_NAME: ${CENTER_NAME:-Медицинский центр}
       # CERT_FILE: /certs/cert.pem
@@ -22,7 +27,7 @@ services:
     volumes:
       - mars-data:/data
       - mars-models:/models
-      # - ./certs:/certs:ro
+      - ./certs:/certs:ro
     depends_on:
       - ollama
     restart: unless-stopped
